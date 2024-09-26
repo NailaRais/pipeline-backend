@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	qt "github.com/frankban/quicktest"
 	"github.com/go-redis/redismock/v9"
 	"github.com/gofrs/uuid"
 	"github.com/gojuno/minimock/v3"
@@ -19,6 +18,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"gopkg.in/guregu/null.v4"
 	"gorm.io/gorm"
+
+	qt "github.com/frankban/quicktest"
 
 	"github.com/instill-ai/pipeline-backend/config"
 	"github.com/instill-ai/pipeline-backend/pkg/constant"
@@ -189,7 +190,7 @@ func TestService_ListPipelineRuns(t *testing.T) {
 				aclClient,
 				mockConverter,
 				mgmtPrivateClient,
-				mockMinio,
+				mockMinio, nil, nil, uuid.Must(uuid.NewV4()),
 			)
 
 			ctx := context.Background()
@@ -410,7 +411,7 @@ func TestService_ListPipelineRuns_OrgResource(t *testing.T) {
 				aclClient,
 				mockConverter,
 				mgmtPrivateClient,
-				mockMinio,
+				mockMinio, nil, nil, uuid.Must(uuid.NewV4()),
 			)
 
 			ctx := context.Background()
