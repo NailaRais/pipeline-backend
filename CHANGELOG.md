@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.42.3-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.42.2-beta...v0.42.3-beta) (2024-10-12)
+
+
+### Bug Fixes
+
+* hide preset pipelines in GET /pipelines endpoint ([#733](https://github.com/instill-ai/pipeline-backend/issues/733)) ([baa8919](https://github.com/instill-ai/pipeline-backend/commit/baa891931771a351280c19d430b0d7f6fd2d4b76))
+* the InstillAcceptFormats doesn't works with collection component ([#732](https://github.com/instill-ai/pipeline-backend/issues/732)) ([3d1c053](https://github.com/instill-ai/pipeline-backend/commit/3d1c053685ba10ea50b61d5674547134482d11c7))
+
 ## [0.42.2-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.42.1-beta...v0.42.2-beta) (2024-10-08)
 
 
