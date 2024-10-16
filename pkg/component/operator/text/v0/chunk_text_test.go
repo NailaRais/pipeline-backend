@@ -1,6 +1,7 @@
 package text
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/frankban/quicktest"
