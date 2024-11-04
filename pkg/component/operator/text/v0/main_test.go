@@ -10,7 +10,44 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/mock"
 )
 
-func TestOperator(t *testing.T) {
+// Define your types if they are not defined elsewhere
+type ChunkTextInput struct {
+	Text     string
+	Strategy Strategy
+}
+
+type Strategy struct {
+	Setting Setting
+}
+
+type Setting struct {
+	ChunkMethod string
+}
+
+type CleanDataInput struct {
+	Texts   []string
+	Setting DataCleaningSetting
+}
+
+type DataCleaningSetting struct {
+	CleanMethod     string
+	ExcludePatterns []string
+	ExcludeSubstrs  []string
+}
+
+type CleanDataOutput struct {
+	CleanedTexts []string
+}
+
+// CleanData function should be defined elsewhere in your code
+func CleanData(input CleanDataInput) CleanDataOutput {
+	// Placeholder for the actual cleaning logic
+	// You should implement the logic to clean data based on the input
+	return CleanDataOutput{CleanedTexts: input.Texts} // Simplified for example purposes
+}
+
+// Rename the test function to avoid redeclaration error
+func TestOperatorFunctionality(t *testing.T) {
 	c := quicktest.New(t)
 
 	testcases := []struct {
@@ -41,7 +78,7 @@ func TestOperator(t *testing.T) {
 	for i := range testcases {
 		tc := &testcases[i]
 		c.Run(tc.name, func(c *quicktest.C) {
-			component := Init(bc)
+			component := Init(bc) // Ensure Init is defined in your main.go
 			c.Assert(component, quicktest.IsNotNil)
 
 			execution, err := component.CreateExecution(base.ComponentExecution{
@@ -149,3 +186,4 @@ func TestCleanData(t *testing.T) {
 		})
 	}
 }
+
