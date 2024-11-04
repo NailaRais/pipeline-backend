@@ -10,6 +10,34 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/mock"
 )
 
+// Add your ChunkTextInput, Strategy, Setting, and any other necessary types here.
+
+type ChunkTextInput struct {
+	Text     string
+	Strategy Strategy
+}
+
+type Strategy struct {
+	Setting Setting
+}
+
+type Setting struct {
+	ChunkMethod string
+}
+
+// Define the component type you are using.
+type YourComponentType struct {
+	// Add fields as necessary.
+}
+
+// Init initializes the component with the provided base.Component and returns a pointer to the component.
+func Init(bc base.Component) *YourComponentType {
+	component := &YourComponentType{
+		// Initialize any fields if necessary.
+	}
+	return component
+}
+
 func TestOperator(t *testing.T) {
 	c := quicktest.New(t)
 
