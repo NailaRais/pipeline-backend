@@ -187,7 +187,7 @@ func TestCleanData(t *testing.T) {
 	}
 }
 
-// Helper function to adjust start and end positions if they deviate from expected values
+// Helper function to adjust start and end positions if they deviate from expected values 
 func adjustPosition(expected, actual int) int {
 	if expected != actual {
 		return expected // Optionally, adjust tolerance here if slight variations are acceptable
@@ -214,11 +214,10 @@ func validateChunkPositions(c *quicktest.C, chunks []TextChunk, expectedChunks [
 		endPos := adjustPosition(expectedChunks[i].EndPosition, chunk.EndPosition)
 
 		// Validate positions
-		c.Assert(startPos, quicktest.Equals, chunk.StartPosition)
-		c.Assert(endPos, quicktest.Equals, chunk.EndPosition)
+		c.Assert(startPos, quicktest.Equals, chunk.StartPosition, quicktest.Commentf("Start position mismatch in chunk %d", i))
+		c.Assert(endPos, quicktest.Equals, chunk.EndPosition, quicktest.Commentf("End position mismatch in chunk %d", i))
 
 		// Validate token count
 		checkTokenCount(c, chunk.TokenCount, expectedChunks[i].TokenCount)
 	}
 }
-
