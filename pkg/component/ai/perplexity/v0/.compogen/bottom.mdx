@@ -1,0 +1,45 @@
+## Example Recipes
+
+```yaml
+version: v1beta
+
+variable:
+  prompt:
+    type: string
+    title: Prompt
+
+component:
+  perplexity-0:
+    type: perplexity
+    task: TASK_CHAT
+    input:
+      data:
+        model: sonar
+        messages:
+          - content:
+            - text: Be precise and concise.
+              type: text
+            role: system
+          - content:
+            - text: ${variable.prompt}
+              type: text
+            role: user
+            name: Miles
+      parameter:
+        max-tokens: 500
+        temperature: 0.2
+        top-p: 0.9
+        stream: false
+        search-domain-filter:
+          - perplexity.ai
+        search-recency-filter: month
+        top-k: 0
+        presence-penalty: 0
+        frequency-penalty: 1
+
+output:
+  perplexity:
+    title: Perplexity
+    value: ${perplexity-0.output}
+
+```

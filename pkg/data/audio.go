@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/data/format"
 	"github.com/instill-ai/pipeline-backend/pkg/data/path"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 )
 
 type audioData struct {
@@ -23,14 +25,15 @@ type audioData struct {
 func (audioData) IsValue() {}
 
 const (
-	MP3  = "audio/mpeg"
-	WAV  = "audio/wav"
-	AAC  = "audio/aac"
-	OGG  = "audio/ogg"
-	FLAC = "audio/flac"
-	M4A  = "audio/mp4"
-	WMA  = "audio/x-ms-wma"
-	AIFF = "audio/aiff"
+	MP3       = "audio/mpeg"
+	WAV       = "audio/wav"
+	AAC       = "audio/aac"
+	OGG       = "audio/ogg"
+	FLAC      = "audio/flac"
+	M4A       = "audio/mp4"
+	WMA       = "audio/x-ms-wma"
+	AIFF      = "audio/aiff"
+	WEBMAUDIO = "audio/webm"
 )
 
 var audioGetter = map[string]func(*audioData) (format.Value, error){
@@ -44,31 +47,45 @@ var audioGetter = map[string]func(*audioData) (format.Value, error){
 	"m4a":         func(a *audioData) (format.Value, error) { return a.Convert(M4A) },
 	"wma":         func(a *audioData) (format.Value, error) { return a.Convert(WMA) },
 	"aiff":        func(a *audioData) (format.Value, error) { return a.Convert(AIFF) },
+	"webm":        func(a *audioData) (format.Value, error) { return a.Convert(WEBMAUDIO) },
 }
 
-func NewAudioFromBytes(b []byte, contentType, fileName string) (*audioData, error) {
-	return createAudioData(b, contentType, fileName)
+func NewAudioFromBytes(b []byte, contentType, filename string, isUnified bool) (*audioData, error) {
+	return createAudioData(b, contentType, filename, isUnified)
 }
 
-func NewAudioFromURL(url string) (*audioData, error) {
-	b, contentType, fileName, err := convertURLToBytes(url)
+func NewAudioFromURL(ctx context.Context, binaryFetcher external.BinaryFetcher, url string, isUnified bool) (video *audioData, err error) {
+	b, contentType, filename, err := binaryFetcher.FetchFromURL(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	return createAudioData(b, contentType, fileName)
+	return createAudioData(b, contentType, filename, isUnified)
 }
 
-func createAudioData(b []byte, contentType, fileName string) (*audioData, error) {
-	if contentType != OGG {
-		var err error
-		b, err = convertAudio(b, contentType, OGG)
-		if err != nil {
-			return nil, err
-		}
-		contentType = OGG
+func createAudioData(b []byte, contentType, filename string, isUnified bool) (*audioData, error) {
+	// Normalize MIME type first
+	normalizedContentType := normalizeMIMEType(contentType)
+
+	// Special handling: if video/webm is passed for audio, convert to audio/webm
+	if normalizedContentType == "video/webm" {
+		normalizedContentType = WEBMAUDIO
 	}
 
-	f, err := NewFileFromBytes(b, contentType, fileName)
+	finalContentType := normalizedContentType
+
+	// If the audio should be unified, convert it to OGG (the internal unified audio format)
+	if isUnified {
+		if normalizedContentType != OGG {
+			var err error
+			b, err = convertAudio(b, normalizedContentType, OGG)
+			if err != nil {
+				return nil, err
+			}
+			finalContentType = OGG
+		}
+	}
+
+	f, err := NewFileFromBytes(b, finalContentType, filename)
 	if err != nil {
 		return nil, err
 	}
@@ -207,4 +224,37 @@ func (a *audioData) Get(p *path.Path) (v format.Value, err error) {
 	}
 
 	return result.Get(remainingPath)
+}
+
+// audioData has unexported fields, which cannot be accessed by the regular
+// encoder / decoder. A custom encode/decode method pair is defined to send and
+// receive the type with the gob package.
+
+// encAudioData is redundant with audioData but allows us not to modify the
+// format.Image interface signature.
+type encAudioData struct {
+	encFileData
+	Duration   time.Duration
+	SampleRate int
+}
+
+func (a *audioData) GobEncode() ([]byte, error) {
+	return json.Marshal(encAudioData{
+		encFileData: a.asEncodedStruct(),
+		Duration:    a.duration,
+		SampleRate:  a.sampleRate,
+	})
+}
+
+func (a *audioData) GobDecode(b []byte) error {
+	var ea encAudioData
+	if err := json.Unmarshal(b, &ea); err != nil {
+		return err
+	}
+
+	a.fileData = ea.asFileData()
+	a.duration = ea.Duration
+	a.sampleRate = ea.SampleRate
+
+	return nil
 }

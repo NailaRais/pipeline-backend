@@ -1,0 +1,30 @@
+TASK_MARSHAL:
+  input:
+    description: Input
+    uiOrder: 0
+    properties:
+      object:
+        description: Json object to be marshaled
+        uiOrder: 0
+        instillUpstreamTypes:
+          - reference
+        required: []
+        title: Object
+        type: object
+    required:
+      - object
+    title: Input
+    type: object
+  output:
+    description: Output
+    uiOrder: 0
+    properties:
+      string:
+        description: Data
+        uiOrder: 0
+        title: Data
+        type: string
+    required:
+      - string
+    title: Output
+    type: object

@@ -10,7 +10,7 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 
-	artifactPB "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
 )
 
 func (e *execution) matchFileStatus(input *structpb.Struct) (*structpb.Struct, error) {
@@ -21,33 +21,34 @@ func (e *execution) matchFileStatus(input *structpb.Struct) (*structpb.Struct, e
 		return nil, fmt.Errorf("failed to convert input to struct: %w", err)
 	}
 
-	artifactClient, connection := e.client, e.connection
-
-	defer connection.Close()
+	artifactClient := e.client
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	ctx = metadata.NewOutgoingContext(ctx, getRequestMetadata(e.SystemVariables))
 
 	for {
-		matchRes, err := artifactClient.ListCatalogFiles(ctx, &artifactPB.ListCatalogFilesRequest{
-			NamespaceId: inputStruct.Namespace,
-			CatalogId:   inputStruct.CatalogID,
-			Filter: &artifactPB.ListCatalogFilesFilter{
-				FileUids: []string{inputStruct.FileUID},
-			},
+		filter := fmt.Sprintf(`id="%s"`, inputStruct.FileUID)
+		matchRes, err := artifactClient.ListFiles(ctx, &artifactpb.ListFilesRequest{
+			NamespaceId:     inputStruct.Namespace,
+			KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+			Filter:          &filter,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to match file status: %w", err)
 		}
 
-		if matchRes.Files[0].ProcessStatus == artifactPB.FileProcessStatus_FILE_PROCESS_STATUS_COMPLETED {
+		if len(matchRes.Files) == 0 {
+			return nil, fmt.Errorf("file not found")
+		}
+
+		if matchRes.Files[0].ProcessStatus == artifactpb.FileProcessStatus_FILE_PROCESS_STATUS_COMPLETED {
 			return base.ConvertToStructpb(MatchFileStatusOutput{
 				Succeeded: true,
 			})
 		}
 
-		if matchRes.Files[0].ProcessStatus == artifactPB.FileProcessStatus_FILE_PROCESS_STATUS_FAILED {
+		if matchRes.Files[0].ProcessStatus == artifactpb.FileProcessStatus_FILE_PROCESS_STATUS_FAILED {
 			return base.ConvertToStructpb(MatchFileStatusOutput{
 				Succeeded: false,
 			})

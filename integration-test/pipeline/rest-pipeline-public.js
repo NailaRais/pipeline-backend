@@ -12,10 +12,10 @@ export function CheckCreate(data) {
 
     var reqBody = Object.assign(
       {
-        id: randomString(32),
+        id: constant.dbIDPrefix + randomString(10),
         description: randomString(50),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     // Create a pipeline
@@ -155,7 +155,7 @@ export function CheckCreate(data) {
       }
     );
 
-    reqBody.id = randomString(40);
+    reqBody.id = constant.dbIDPrefix + randomString(40);
     check(
       http.request(
         "POST",
@@ -219,10 +219,10 @@ export function CheckList(data) {
     for (var i = 0; i < numPipelines; i++) {
       reqBodies[i] = Object.assign(
         {
-          id: randomString(10),
+          id: constant.dbIDPrefix + randomString(10),
           description: randomString(50),
         },
-        constant.simplePipelineWithJSONRecipe
+        constant.simplePipelineWithYAMLRecipe
       );
     }
 
@@ -390,10 +390,10 @@ export function CheckGet(data) {
   group("Pipelines API: Get a pipeline", () => {
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
         description: randomString(50),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     // Create a pipeline
@@ -483,9 +483,9 @@ export function CheckUpdate(data) {
   group("Pipelines API: Update a pipeline", () => {
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     // Create a pipeline
@@ -574,7 +574,7 @@ export function CheckUpdate(data) {
       }
     );
 
-    reqBodyUpdate.id = randomString(10);
+    reqBodyUpdate.id = constant.dbIDPrefix + randomString(10);
     check(
       http.request(
         "PATCH",
@@ -636,9 +636,9 @@ export function CheckRename(data) {
   group("Pipelines API: Rename a pipeline", () => {
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     // Create a pipeline
@@ -655,7 +655,7 @@ export function CheckRename(data) {
         r.json().pipeline.name === `${constant.namespace}/pipelines/${reqBody.id}`,
     });
 
-    reqBody.new_pipeline_id = randomString(10);
+    reqBody.new_pipeline_id = constant.dbIDPrefix + randomString(10);
 
     check(
       http.request(
@@ -697,9 +697,9 @@ export function CheckLookUp(data) {
   group("Pipelines API: Look up a pipeline by uid", () => {
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     // Create a pipeline

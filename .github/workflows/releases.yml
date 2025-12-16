@@ -13,15 +13,13 @@ jobs:
       TAG_NAME: ${{ steps.release.outputs.tag_name }}
       SHA: ${{ steps.release.outputs.sha }}
     steps:
-      - uses: google-github-actions/release-please-action@v3
+      - uses: googleapis/release-please-action@v4
         id: release
         with:
           token: ${{ secrets.botGitHubToken }}
-          release-type: go
-          command: manifest
           config-file: release-please/config.json
           manifest-file: release-please/manifest.json
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         if: ${{ steps.release.outputs.release_created }}
         with:
           token: ${{ secrets.botGitHubToken }}

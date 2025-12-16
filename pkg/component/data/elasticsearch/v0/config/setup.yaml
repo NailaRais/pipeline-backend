@@ -1,0 +1,19 @@
+additionalProperties: false
+properties:
+  api-key:
+    description: Fill in the API key for the Elasticsearch instance (please use encoded one).
+    type: string
+    instillSecret: true
+    uiOrder: 1
+    title: API Key
+  cloud-id:
+    description: Fill in the Cloud ID for the Elasticsearch instance.
+    type: string
+    instillSecret: true
+    uiOrder: 0
+    title: Cloud ID
+required:
+  - api-key
+  - cloud-id
+title: Elasticsearch Connection
+type: object

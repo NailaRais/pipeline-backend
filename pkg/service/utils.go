@@ -5,20 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/instill-ai/pipeline-backend/pkg/constant"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
 	"github.com/instill-ai/pipeline-backend/pkg/resource"
 
-	errdomain "github.com/instill-ai/pipeline-backend/pkg/errors"
 	runpb "github.com/instill-ai/protogen-go/common/run/v1alpha"
 	mgmtpb "github.com/instill-ai/protogen-go/core/mgmt/v1beta"
-	pipelinepb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	constantx "github.com/instill-ai/x/constant"
+	errorsx "github.com/instill-ai/x/errors"
+	resourcex "github.com/instill-ai/x/resource"
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -46,11 +48,11 @@ func (s *service) checkNamespacePermission(ctx context.Context, ns resource.Name
 			return err
 		}
 		if !granted {
-			return errdomain.ErrUnauthorized
+			return errorsx.ErrUnauthorized
 		}
 	} else {
-		if ns.NsUID != uuid.FromStringOrNil(resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey)) {
-			return errdomain.ErrUnauthorized
+		if ns.NsUID != uuid.FromStringOrNil(resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey)) {
+			return errorsx.ErrUnauthorized
 		}
 	}
 	return nil
@@ -58,7 +60,7 @@ func (s *service) checkNamespacePermission(ctx context.Context, ns resource.Name
 
 func (s *service) GetCtxUserNamespace(ctx context.Context) (resource.Namespace, error) {
 
-	uid := uuid.FromStringOrNil(resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey))
+	uid := uuid.FromStringOrNil(resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey))
 	resp, err := s.mgmtPrivateServiceClient.CheckNamespaceByUIDAdmin(ctx, &mgmtpb.CheckNamespaceByUIDAdminRequest{
 		Uid: uid.String(),
 	})
@@ -66,12 +68,37 @@ func (s *service) GetCtxUserNamespace(ctx context.Context) (resource.Namespace, 
 		return resource.Namespace{}, fmt.Errorf("namespace error")
 	}
 	return resource.Namespace{
-		NsType: resource.NamespaceType("users"),
+		NsType: resource.User,
 		NsID:   resp.Id,
 		NsUID:  uid,
 	}, nil
 }
-func (s *service) GetRscNamespace(ctx context.Context, namespaceID string) (resource.Namespace, error) {
+
+func (s *service) GetNamespaceByUID(ctx context.Context, namespaceUID uuid.UUID) (resource.Namespace, error) {
+	resp, err := s.mgmtPrivateServiceClient.CheckNamespaceByUIDAdmin(ctx, &mgmtpb.CheckNamespaceByUIDAdminRequest{
+		Uid: namespaceUID.String(),
+	})
+	if err != nil {
+		return resource.Namespace{}, err
+	}
+	switch resp.Type {
+	case mgmtpb.CheckNamespaceByUIDAdminResponse_NAMESPACE_USER:
+		return resource.Namespace{
+			NsType: resource.User,
+			NsID:   resp.Id,
+			NsUID:  namespaceUID,
+		}, nil
+	case mgmtpb.CheckNamespaceByUIDAdminResponse_NAMESPACE_ORGANIZATION:
+		return resource.Namespace{
+			NsType: resource.Organization,
+			NsID:   resp.Id,
+			NsUID:  namespaceUID,
+		}, nil
+	}
+	return resource.Namespace{}, fmt.Errorf("namespace error")
+}
+
+func (s *service) GetNamespaceByID(ctx context.Context, namespaceID string) (resource.Namespace, error) {
 
 	resp, err := s.mgmtPrivateServiceClient.CheckNamespaceAdmin(ctx, &mgmtpb.CheckNamespaceAdminRequest{
 		Id: namespaceID,
@@ -79,13 +106,14 @@ func (s *service) GetRscNamespace(ctx context.Context, namespaceID string) (reso
 	if err != nil {
 		return resource.Namespace{}, err
 	}
-	if resp.Type == mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_USER {
+	switch resp.Type {
+	case mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_USER:
 		return resource.Namespace{
 			NsType: resource.User,
 			NsID:   namespaceID,
 			NsUID:  uuid.FromStringOrNil(resp.Uid),
 		}, nil
-	} else if resp.Type == mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_ORGANIZATION {
+	case mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_ORGANIZATION:
 		return resource.Namespace{
 			NsType: resource.Organization,
 			NsID:   namespaceID,
@@ -98,22 +126,24 @@ func (s *service) GetRscNamespace(ctx context.Context, namespaceID string) (reso
 // Helper methods
 func (s *service) convertPipelineRunToPB(run datamodel.PipelineRun) (*pipelinepb.PipelineRun, error) {
 	result := &pipelinepb.PipelineRun{
-		PipelineUid:     run.PipelineUID.String(),
-		PipelineId:      &run.Pipeline.ID,
-		PipelineRunUid:  run.PipelineTriggerUID.String(),
-		PipelineVersion: run.PipelineVersion,
-		Status:          runpb.RunStatus(run.Status),
-		Source:          runpb.RunSource(run.Source),
-		StartTime:       timestamppb.New(run.StartedTime),
-		Error:           run.Error.Ptr(),
+		PipelineId:          &run.Pipeline.ID,
+		PipelineNamespaceId: run.Pipeline.NamespaceID,
+		PipelineRunUid:      run.PipelineTriggerUID.String(),
+		PipelineVersion:     run.PipelineVersion,
+		Status:              runpb.RunStatus(run.Status),
+		Source:              runpb.RunSource(run.Source),
+		StartTime:           timestamppb.New(run.StartedTime),
+		Error:               run.Error.Ptr(),
 	}
 
-	if run.TotalDuration.Valid {
-		totalDuration := int32(run.TotalDuration.Int64)
+	if run.CompletedTime.Valid {
+		totalDuration := int32(run.CompletedTime.Time.Sub(run.StartedTime).Milliseconds())
+
+		result.CompleteTime = timestamppb.New(run.CompletedTime.Time)
 		result.TotalDuration = &totalDuration
 	}
-	if run.CompletedTime.Valid {
-		result.CompleteTime = timestamppb.New(run.CompletedTime.Time)
+	if run.BlobDataExpirationTime.Valid {
+		result.BlobDataExpirationTime = timestamppb.New(run.BlobDataExpirationTime.Time)
 	}
 
 	return result, nil
@@ -128,12 +158,14 @@ func (s *service) convertComponentRunToPB(run datamodel.ComponentRun) (*pipeline
 		Error:          run.Error.Ptr(),
 	}
 
-	if run.TotalDuration.Valid {
-		totalDuration := int32(run.TotalDuration.Int64)
+	if run.CompletedTime.Valid {
+		totalDuration := int32(run.CompletedTime.Time.Sub(run.StartedTime).Milliseconds())
+
+		result.CompleteTime = timestamppb.New(run.CompletedTime.Time)
 		result.TotalDuration = &totalDuration
 	}
-	if run.CompletedTime.Valid {
-		result.CompleteTime = timestamppb.New(run.CompletedTime.Time)
+	if run.BlobDataExpirationTime.Valid {
+		result.BlobDataExpirationTime = timestamppb.New(run.BlobDataExpirationTime.Time)
 	}
 
 	for _, fileReference := range run.Inputs {
@@ -155,8 +187,7 @@ func (s *service) convertComponentRunToPB(run datamodel.ComponentRun) (*pipeline
 	return result, nil
 }
 
-// CanViewPrivateData - only with requester ns could users see their input/output data
-func CanViewPrivateData(namespace, requesterUID string) bool {
+func canViewPrivateData(namespace, requesterUID uuid.UUID) bool {
 	return namespace == requesterUID
 }
 
@@ -203,4 +234,16 @@ func parseRecipeMetadata(ctx context.Context, metadataMap map[string][]byte, con
 	// Some recipes cannot generate a DataSpecification, so we can ignore the error.
 	dataSpec, _ := converter.GeneratePipelineDataSpec(dbRecipe.Variable, dbRecipe.Output, dbRecipe.Component)
 	return pbStruct, dataSpec, nil
+}
+
+func isUnstructuredType(format string) bool {
+	if strings.HasPrefix(format, "array:") {
+		return format != "array:string" &&
+			format != "array:number" &&
+			format != "array:boolean"
+	}
+	return format != "string" &&
+		format != "number" &&
+		format != "boolean" &&
+		format != "json"
 }

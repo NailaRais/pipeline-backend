@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -18,13 +19,15 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/russross/blackfriday/v2"
 
+	"github.com/instill-ai/pipeline-backend/pkg/component/resources/schemas"
+
 	componentbase "github.com/instill-ai/pipeline-backend/pkg/component/base"
 )
 
 const (
-	definitionsFile = "definition.json"
-	setupFile       = "setup.json"
-	tasksFile       = "tasks.json"
+	definitionsFile = "definition.yaml"
+	setupFile       = "setup.yaml"
+	tasksFile       = "tasks.yaml"
 )
 
 //go:embed resources/templates/readme.mdx.tmpl
@@ -51,7 +54,11 @@ func NewREADMEGenerator(configDir, outputFile string, extraContentPaths map[stri
 }
 
 func (g *READMEGenerator) parseDefinition(configDir string) (d definition, err error) {
-	definitionJSON, err := os.ReadFile(filepath.Join(configDir, definitionsFile))
+	definitionYAML, err := os.ReadFile(filepath.Join(configDir, definitionsFile))
+	if err != nil {
+		return d, err
+	}
+	definitionJSON, err := convertYAMLToJSON(definitionYAML)
 	if err != nil {
 		return d, err
 	}
@@ -74,11 +81,15 @@ func (g *READMEGenerator) parseDefinition(configDir string) (d definition, err e
 }
 
 func (g *READMEGenerator) parseSetup(configDir string) (s *objectSchema, err error) {
-	setupJSON, err := os.ReadFile(filepath.Join(configDir, setupFile))
+	setupYAML, err := os.ReadFile(filepath.Join(configDir, setupFile))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	setupJSON, err := convertYAMLToJSON(setupYAML)
+	if err != nil {
 		return nil, err
 	}
 
@@ -100,7 +111,11 @@ func (g *READMEGenerator) parseSetup(configDir string) (s *objectSchema, err err
 }
 
 func (g *READMEGenerator) parseTasks(configDir string) (map[string]task, error) {
-	tasksJSON, err := os.ReadFile(filepath.Join(configDir, tasksFile))
+	tasksYAML, err := os.ReadFile(filepath.Join(configDir, tasksFile))
+	if err != nil {
+		return nil, err
+	}
+	tasksJSON, err := convertYAMLToJSON(tasksYAML)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +125,11 @@ func (g *READMEGenerator) parseTasks(configDir string) (map[string]task, error) 
 	}
 	additionalJSONs := map[string][]byte{}
 	for _, file := range files {
-		additionalJSON, err := os.ReadFile(filepath.Join(configDir, file.Name()))
+		additionalYAML, err := os.ReadFile(filepath.Join(configDir, file.Name()))
+		if err != nil {
+			return nil, err
+		}
+		additionalJSON, err := convertYAMLToJSON(additionalYAML)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +137,14 @@ func (g *READMEGenerator) parseTasks(configDir string) (map[string]task, error) 
 
 	}
 
-	renderedTasksJSON, err := componentbase.RenderJSON(tasksJSON, additionalJSONs)
+	schemaJSON, err := convertYAMLToJSON(schemas.SchemaYAML)
+	if err != nil {
+		return nil, err
+	}
+	additionalJSONBytes := map[string][]byte{
+		"schema.yaml": schemaJSON,
+	}
+	renderedTasksJSON, err := componentbase.RenderJSON(tasksJSON, additionalJSONBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -127,17 +153,11 @@ func (g *READMEGenerator) parseTasks(configDir string) (map[string]task, error) 
 		return nil, err
 	}
 
-	if err := g.validate.Var(tasks, "gt=0,dive"); err != nil {
+	if err := g.validate.Var(tasks, "dive"); err != nil {
 		return nil, fmt.Errorf("invalid tasks file:\n%w", asValidationError(err))
 	}
 
 	return tasks, nil
-}
-
-// This is used to build the cURL examples for Instill Core and Cloud.
-type host struct {
-	Name string
-	URL  string
 }
 
 // Generate creates a MDX file with the component documentation from the
@@ -167,12 +187,6 @@ func (g *READMEGenerator) Generate() error {
 		"anchorTaskObject":         anchorTaskObject,
 		"insertHeaderByObjectKey":  insertHeaderByObjectKey,
 		"insertHeaderByConstValue": insertHeaderByConstValue,
-		"hosts": func() []host {
-			return []host{
-				{Name: "Instill-Cloud", URL: "https://api.instill.tech"},
-				{Name: "Instill-Core", URL: "http://localhost:8080"},
-			}
-		},
 	}).Parse(readmeTmpl)
 	if err != nil {
 		return err
@@ -254,14 +268,14 @@ func (p readmeParams) parseDefinition(d definition, s *objectSchema, tasks map[s
 	}
 
 	p.ID = d.ID
-	p.Title = d.Title
-	p.Vendor = d.Vendor
-	p.Description = d.Description
+	p.Title = escapeCurlyBracesForReadme(d.Title)
+	p.Vendor = escapeCurlyBracesForReadme(d.Vendor)
+	p.Description = escapeCurlyBracesForReadme(d.Description)
 	p.IsDraft = !d.Public
 	p.ReleaseStage = d.ReleaseStage
 	p.SourceURL = d.SourceURL
 
-	p.SetupConfig = setupConfig{Prerequisites: d.Prerequisites}
+	p.SetupConfig = setupConfig{Prerequisites: escapeCurlyBracesForReadme(d.Prerequisites)}
 
 	if s != nil {
 		p.SetupConfig.Properties = parseResourceProperties(s)
@@ -281,7 +295,7 @@ func parseREADMETasks(availableTasks []string, tasks map[string]task) ([]readmeT
 
 		rt := readmeTask{
 			ID:          at,
-			Description: t.Description,
+			Description: escapeCurlyBracesForReadme(t.Description),
 			Input:       parseResourceProperties(t.Input),
 			Output:      parseResourceProperties(t.Output),
 		}
@@ -293,6 +307,7 @@ func parseREADMETasks(availableTasks []string, tasks map[string]task) ([]readmeT
 		if rt.Title = t.Title; rt.Title == "" {
 			rt.Title = titleCase(componentbase.TaskIDToTitle(at))
 		}
+		rt.Title = escapeCurlyBracesForReadme(rt.Title)
 
 		readmeTasks[i] = rt
 	}
@@ -321,17 +336,22 @@ func parseResourceProperties(o *objectSchema) []resourceProperty {
 		}
 
 		prop.Title = titleCase(prop.Title)
+		prop.replaceFormat()
 
-		// If type is map, extend the type with the element type.
+		// If type is array, extend the type with the element type.
 		switch prop.Type {
 		case "array":
 			if prop.Items.Type != "" {
-				prop.Type += fmt.Sprintf("[%s]", prop.Items.Type)
+				if prop.Items.Type == "*" {
+					prop.Type = "array[any]"
+				} else {
+					prop.Type += fmt.Sprintf("[%s]", prop.Items.Type)
+				}
 			}
 		case "":
 			prop.Type = "any"
 		}
-		prop.replaceDescription()
+		prop.escapeAllTextFields()
 
 		propMap[k] = prop
 	}
@@ -343,11 +363,16 @@ func parseResourceProperties(o *objectSchema) []resourceProperty {
 		}
 	}
 
-	props := make([]resourceProperty, len(propMap))
-	idx := 0
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(propMap))
 	for k := range propMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	props := make([]resourceProperty, len(propMap))
+	for idx, k := range keys {
 		props[idx] = propMap[k]
-		idx++
 	}
 
 	// Note: The order might not be consecutive numbers.
@@ -357,6 +382,11 @@ func parseResourceProperties(o *objectSchema) []resourceProperty {
 		}
 		return cmp.Compare(i.ID, j.ID)
 	})
+
+	// Ensure all text fields are processed (handles $ref resolved properties)
+	for i := range props {
+		props[i].escapeAllTextFields()
+	}
 
 	return props
 }
@@ -393,51 +423,92 @@ func (rt *readmeTask) parseObjectProperties(properties map[string]property, isIn
 			continue
 		}
 
-		op.replaceDescription()
+		op.escapeAllTextFields()
+		op.replaceFormat()
 
 		if op.Type == "object" {
+			// Process nested properties' descriptions before storing them
+			processedProperties := make(map[string]property)
+			// Sort keys for deterministic ordering
+			propKeys := make([]string, 0, len(op.Properties))
+			for key := range op.Properties {
+				propKeys = append(propKeys, key)
+			}
+			sort.Strings(propKeys)
+
+			for _, key := range propKeys {
+				prop := op.Properties[key]
+				prop.escapeAllTextFields()
+				prop.replaceFormat()
+				processedProperties[key] = prop
+			}
 
 			if isInput {
+				schema := objectSchema{
+					Properties:  processedProperties,
+					Description: op.Description,
+					Title:       op.Title,
+				}
+				schema.escapeAllTextFields()
 				rt.InputObjects = append(rt.InputObjects, map[string]objectSchema{
-					op.Title: {
-						Properties:  op.Properties,
-						Description: op.Description,
-					},
+					op.Title: schema,
 				})
-				rt.parseObjectProperties(op.Properties, isInput)
+				rt.parseObjectProperties(processedProperties, isInput)
 			} else {
+				schema := objectSchema{
+					Properties:  processedProperties,
+					Description: op.Description,
+					Title:       op.Title,
+				}
+				schema.escapeAllTextFields()
 				rt.OutputObjects = append(rt.OutputObjects, map[string]objectSchema{
-					op.Title: {
-						Properties:  op.Properties,
-						Description: op.Description,
-					},
+					op.Title: schema,
 				})
-				rt.parseObjectProperties(op.Properties, isInput)
+				rt.parseObjectProperties(processedProperties, isInput)
 			}
 		} else { // op.Type == "array[object]" || (op.Type == "array" || op.Items.Type == "object")
 
+			props := op.Items.Properties
+			// Sort keys for deterministic ordering
+			propKeys := make([]string, 0, len(props))
+			for key := range props {
+				propKeys = append(propKeys, key)
+			}
+			sort.Strings(propKeys)
+
+			for _, key := range propKeys {
+				prop := props[key]
+				prop.escapeAllTextFields()
+				prop.replaceFormat()
+				props[key] = prop
+			}
+
 			if isInput {
+				schema := objectSchema{
+					Properties:  op.Items.Properties,
+					Description: op.Description,
+					Title:       op.Title,
+				}
+				schema.escapeAllTextFields()
 				rt.InputObjects = append(rt.InputObjects, map[string]objectSchema{
-					op.Title: {
-						Properties:  op.Items.Properties,
-						Description: op.Description,
-					},
+					op.Title: schema,
 				})
 
 				rt.parseObjectProperties(op.Items.Properties, isInput)
 			} else {
+				schema := objectSchema{
+					Properties:  op.Items.Properties,
+					Description: op.Description,
+					Title:       op.Title,
+				}
+				schema.escapeAllTextFields()
 				rt.OutputObjects = append(rt.OutputObjects, map[string]objectSchema{
-					op.Title: {
-						Properties:  op.Items.Properties,
-						Description: op.Description,
-					},
+					op.Title: schema,
 				})
 				rt.parseObjectProperties(op.Items.Properties, isInput)
 			}
 		}
 	}
-
-	return
 }
 
 func sortPropertiesByOrder(properties map[string]property) []property {
@@ -476,7 +547,15 @@ func (rt *readmeTask) parseOneOfsProperties(properties map[string]property) {
 		return
 	}
 
-	for key, op := range properties {
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		op := properties[key]
 		if op.Deprecated {
 			continue
 		}
@@ -505,8 +584,6 @@ func (rt *readmeTask) parseOneOfsProperties(properties map[string]property) {
 		}
 		rt.parseOneOfsProperties(op.Properties)
 	}
-
-	return
 }
 
 func (sc *setupConfig) parseOneOfProperties(properties map[string]property) {
@@ -514,7 +591,15 @@ func (sc *setupConfig) parseOneOfProperties(properties map[string]property) {
 		return
 	}
 
-	for key, op := range properties {
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		op := properties[key]
 		if op.Deprecated {
 			continue
 		}
@@ -526,8 +611,6 @@ func (sc *setupConfig) parseOneOfProperties(properties map[string]property) {
 			}
 		}
 	}
-
-	return
 }
 
 func firstToLower(s string) string {
@@ -607,6 +690,7 @@ func anchorTaskWithProperty(prop property, taskName string) string {
 	if isSemiStructuredObject(prop) {
 		return prop.Title
 	}
+
 	if prop.Type == "object" ||
 		(prop.Type == "array" && prop.Items.Type == "object") ||
 		(prop.Type == "array[object]") {
@@ -647,7 +731,15 @@ func insertHeaderByConstValue(option objectSchema, taskOrString interface{}) str
 		prefix = "unknown"
 	}
 
-	for _, prop := range option.Properties {
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(option.Properties))
+	for key := range option.Properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		prop := option.Properties[key]
 		if prop.Const != "" {
 			return fmt.Sprintf(`<h5 id="%s-%s"><code>%s</code></h5>`, prefix, blackfriday.SanitizedAnchorName(option.Title), option.Title)
 		}
@@ -655,8 +747,175 @@ func insertHeaderByConstValue(option objectSchema, taskOrString interface{}) str
 	return ""
 }
 
+// escapeCurlyBracesForReadme escapes curly braces in text for readme.com compatibility.
+// README.io treats {variable} as variable placeholders, so we need to escape them.
+func escapeCurlyBracesForReadme(text string) string {
+	if text == "" {
+		return text
+	}
+
+	// Process in order: template variables, JSON patterns, then variable placeholders
+	text = wrapTemplateVariables(text)
+	text = wrapJSONPatterns(text)
+	text = escapeVariablePlaceholders(text)
+
+	return text
+}
+
+// wrapTemplateVariables wraps Go template syntax {{variable}} in backticks
+func wrapTemplateVariables(text string) string {
+	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
+		return text
+	}
+
+	// Skip if already processed (contains backticks around template variables)
+	if strings.Contains(text, "`{{") {
+		return text
+	}
+
+	// Wrap template variables with backticks
+	re := regexp.MustCompile(`\{\{[^}]*\}\}`)
+	return re.ReplaceAllString(text, "`$0`")
+}
+
+// wrapJSONPatterns wraps JSON objects and arrays in backticks
+func wrapJSONPatterns(text string) string {
+	// First handle JSON arrays (they take precedence over individual objects)
+	text = wrapJSONArrays(text)
+
+	// Then handle standalone JSON objects
+	text = wrapJSONObjects(text)
+
+	return text
+}
+
+// wrapJSONArrays finds and wraps JSON arrays containing objects
+func wrapJSONArrays(text string) string {
+	arrayJsonRe := regexp.MustCompile(`\[[^[\]]*\{[^[\]]*"[^"]*"[^[\]]*:[^[\]]*\}[^[\]]*\]`)
+	matches := arrayJsonRe.FindAllString(text, -1)
+
+	for _, match := range matches {
+		if !strings.Contains(text, "`"+match+"`") {
+			text = strings.ReplaceAll(text, match, "`"+match+"`")
+		}
+	}
+
+	return text
+}
+
+// wrapJSONObjects finds and wraps standalone JSON objects using balanced brace matching
+func wrapJSONObjects(text string) string {
+	objects := findJSONObjectsWithBraceMatching(text)
+
+	for _, obj := range objects {
+		// Only wrap if not already wrapped and not part of an array
+		if !isAlreadyWrapped(text, obj) && !isPartOfArray(text, obj) {
+			text = strings.ReplaceAll(text, obj, "`"+obj+"`")
+		}
+	}
+
+	return text
+}
+
+// findJSONObjectsWithBraceMatching finds JSON objects using proper brace matching for nested structures
+func findJSONObjectsWithBraceMatching(s string) []string {
+	var matches []string
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' {
+			// Find the matching closing brace
+			braceCount := 1
+			start := i
+			i++
+
+			for i < len(s) && braceCount > 0 {
+				if s[i] == '{' {
+					braceCount++
+				} else if s[i] == '}' {
+					braceCount--
+				}
+				i++
+			}
+
+			if braceCount == 0 {
+				candidate := s[start:i]
+				// Check if this looks like JSON (contains quotes and colons)
+				if isJSONLike(candidate) {
+					matches = append(matches, candidate)
+				}
+			}
+			i-- // Adjust for the outer loop increment
+		}
+	}
+
+	return matches
+}
+
+// isJSONLike checks if a string looks like JSON by containing quotes and colons
+func isJSONLike(s string) bool {
+	return strings.Contains(s, `"`) && strings.Contains(s, `:`)
+}
+
+// isAlreadyWrapped checks if a pattern is already wrapped in backticks
+func isAlreadyWrapped(text, pattern string) bool {
+	return strings.Contains(text, "`"+pattern+"`")
+}
+
+// isPartOfArray checks if a JSON object is part of an array that should be wrapped as a whole
+func isPartOfArray(text, pattern string) bool {
+	return strings.Contains(text, "["+pattern) || strings.Contains(text, pattern+"]")
+}
+
+// escapeVariablePlaceholders escapes single curly braces that look like variable placeholders
+func escapeVariablePlaceholders(text string) string {
+	// Split by backticks to avoid processing text inside backticks
+	parts := strings.Split(text, "`")
+
+	for i := 0; i < len(parts); i += 2 { // Process only parts outside backticks (even indices)
+		// Match single braces containing identifiers like {cachedContent}, {cache-name}, {snake_case}
+		varRe := regexp.MustCompile(`\{([a-zA-Z_][\w\-]*)\}`)
+		parts[i] = varRe.ReplaceAllString(parts[i], "\\{$1\\}")
+	}
+
+	return strings.Join(parts, "`")
+}
+
 func (prop *property) replaceDescription() {
+	// Always replace newlines with spaces for table formatting
 	prop.Description = strings.ReplaceAll(prop.Description, "\n", " ")
-	prop.Description = strings.ReplaceAll(prop.Description, "{", "\\{")
-	prop.Description = strings.ReplaceAll(prop.Description, "}", "\\}")
+
+	// Escape curly braces for readme.com compatibility
+	prop.Description = escapeCurlyBracesForReadme(prop.Description)
+
+	// Trim trailing whitespace for consistent formatting
+	prop.Description = strings.TrimSpace(prop.Description)
+}
+
+// escapeAllTextFields escapes curly braces in all text fields of a property
+func (prop *property) escapeAllTextFields() {
+	prop.replaceDescription()
+	prop.Title = escapeCurlyBracesForReadme(prop.Title)
+	prop.Const = escapeCurlyBracesForReadme(prop.Const)
+
+	// Escape enum values
+	for i, enum := range prop.Enum {
+		prop.Enum[i] = escapeCurlyBracesForReadme(enum)
+	}
+}
+
+// escapeAllTextFields escapes curly braces in all text fields of an object schema
+func (schema *objectSchema) escapeAllTextFields() {
+	schema.Description = strings.ReplaceAll(schema.Description, "\n", " ")
+	schema.Description = escapeCurlyBracesForReadme(schema.Description)
+	schema.Description = strings.TrimSpace(schema.Description)
+	schema.Title = escapeCurlyBracesForReadme(schema.Title)
+}
+
+func (prop *property) replaceFormat() {
+	if prop.Type == "*" {
+		prop.Type = "any"
+	}
+	if prop.Type == "array" && prop.Items.Type == "*" {
+		prop.Type = "array[any]"
+	}
 }

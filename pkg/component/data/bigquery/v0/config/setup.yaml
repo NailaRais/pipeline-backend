@@ -1,0 +1,30 @@
+additionalProperties: false
+properties:
+  dataset-id:
+    description: Fill in your BigQuery Dataset ID.
+    type: string
+    uiOrder: 2
+    title: BigQuery Dataset ID
+  json-key:
+    description: Contents of the JSON key file with access to the bucket.
+    type: string
+    instillSecret: true
+    uiOrder: 0
+    title: JSON Key File contents
+  project-id:
+    description: Fill in your BigQuery Project ID.
+    type: string
+    uiOrder: 1
+    title: BigQuery Project ID
+  table-name:
+    description: Fill in your BigQuery Table Name.
+    type: string
+    uiOrder: 3
+    title: BigQuery Table Name
+required:
+  - json-key
+  - project-id
+  - dataset-id
+  - table-name
+title: BigQuery Connection
+type: object

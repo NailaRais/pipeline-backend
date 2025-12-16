@@ -2,7 +2,7 @@
 title: "OpenAI"
 lang: "en-US"
 draft: false
-description: "Learn about how to set up a VDP OpenAI component https://github.com/instill-ai/instill-core"
+description: "Learn about how to set up a OpenAI component https://github.com/instill-ai/instill-core"
 ---
 
 The OpenAI component is an AI component that allows users to connect the AI models served on the OpenAI Platform.
@@ -13,19 +13,13 @@ It can carry out the following tasks:
 - [Text to Speech](#text-to-speech)
 - [Text to Image](#text-to-image)
 
-
-
 ## Release Stage
 
 `Alpha`
 
-
-
 ## Configuration
 
-The component definition and tasks are defined in the [definition.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/ai/openai/v0/config/definition.json) and [tasks.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/ai/openai/v0/config/tasks.json) files respectively.
-
-
+The component definition and tasks are defined in the [definition.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/ai/openai/v0/config/definition.yaml) and [tasks.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/ai/openai/v0/config/tasks.yaml) files respectively.
 
 
 ## Setup
@@ -34,7 +28,7 @@ The component definition and tasks are defined in the [definition.json](https://
 In order to communicate with OpenAI, the following connection details need to be
 provided. You may specify them directly in a pipeline recipe as key-value pairs
 within the component's `setup` block, or you can create a **Connection** from
-the [**Integration Settings**](https://www.instill.tech/docs/vdp/integration)
+the [**Integration Settings**](https://docs.instill-ai.com/docs/set-up-component)
 page and reference the whole `setup` as `setup:
 ${connection.<my-connection-id>}`.
 
@@ -42,11 +36,9 @@ ${connection.<my-connection-id>}`.
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| API Key | `api-key` | string | Fill in your OpenAI API key. To find your keys, visit your OpenAI's API Keys page.  |
-| Organization ID | `organization` | string | Specify which organization is used for the requests. Usage will count against the specified organization's subscription quota.  |
-
+| API Key | `api-key` | string | Fill in your OpenAI API key. To find your keys, visit your OpenAI's API Keys page. |
+| Organization ID | `organization` | string | Specify which organization is used for the requests. Usage will count against the specified organization's subscription quota. |
 </div>
-
 
 
 
@@ -54,112 +46,181 @@ ${connection.<my-connection-id>}`.
 
 ### Text Generation
 
-OpenAI's text generation models (often called generative pre-trained transformers or large language models) have been trained to understand natural language, code, and images. The models provide text outputs in response to their inputs. The inputs to these models are also referred to as "prompts". Designing a prompt is essentially how you “program” a large language model model, usually by providing instructions or some examples of how to successfully complete a task.
+OpenAI's text generation models (often called generative pre-trained transformers or large language models) have been trained to understand natural language, code, and images. The models provide text outputs in response to their inputs. The inputs to these models are also referred to as "prompts". Designing a prompt is essentially how you "program" a large language model model, usually by providing instructions or some examples of how to successfully complete a task.
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_TEXT_GENERATION` |
-| Model (required) | `model` | string | ID of the model to use. |
-| Prompt (required) | `prompt` | string | The prompt text |
-| System Message | `system-message` | string | The system message helps set the behavior of the assistant. For example, you can modify the personality of the assistant or provide specific instructions about how it should behave throughout the conversation. By default, the model’s behavior is using a generic message as "You are a helpful assistant." |
-| Image | `images` | array[string] | The images |
-| [Chat History](#text-generation-chat-history) | `chat-history` | array[object] | Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be ignored and will not have any effect when this field is populated. Each message should adhere to the format \{"role": "The message role, i.e. 'system', 'user' or 'assistant'", "content": "message content"\}. |
-| Temperature | `temperature` | number | What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.  We generally recommend altering this or `top-p` but not both.  |
+| Model (required) | `model` | string | ID of the model to use. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`o1`</li><li>`o1-preview`</li><li>`o1-mini`</li><li>`gpt-4o-mini`</li><li>`gpt-4o`</li><li>`gpt-4o-2024-05-13`</li><li>`gpt-4o-2024-08-06`</li><li>`gpt-4-turbo`</li><li>`gpt-4-turbo-2024-04-09`</li><li>`gpt-4-0125-preview`</li><li>`gpt-4-turbo-preview`</li><li>`gpt-4-1106-preview`</li><li>`gpt-4-vision-preview`</li><li>`gpt-4`</li><li>`gpt-4-0314`</li><li>`gpt-4-0613`</li><li>`gpt-4-32k`</li><li>`gpt-4-32k-0314`</li><li>`gpt-4-32k-0613`</li><li>`gpt-3.5-turbo`</li><li>`gpt-3.5-turbo-16k`</li><li>`gpt-3.5-turbo-0301`</li><li>`gpt-3.5-turbo-0613`</li><li>`gpt-3.5-turbo-1106`</li><li>`gpt-3.5-turbo-0125`</li><li>`gpt-3.5-turbo-16k-0613`</li></ul></details> |
+| Prompt (required) | `prompt` | string | The prompt text. |
+| System Message | `system-message` | string | The system message helps set the behavior of the assistant. For example, you can modify the personality of the assistant or provide specific instructions about how it should behave throughout the conversation. By default, the model's behavior is using a generic message as "You are a helpful assistant.". |
+| Image | `images` | array[string] | The images. |
+| [Chat History](#text-generation-chat-history) | `chat-history` | array[object] | Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be ignored and will not have any effect when this field is populated. Each message should adhere to the format `{"role": "The message role, i.e. ''system'', ''user'' or ''assistant''", "content": "message content"}`. |
+| Temperature | `temperature` | number | What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. We generally recommend altering this or `top-p` but not both. |
 | N | `n` | integer | How many chat completion choices to generate for each input message. Note that you will be charged based on the number of generated tokens across all of the choices. Keep `n` as `1` to minimize costs. |
-| Max Tokens | `max-tokens` | integer | The maximum number of tokens that can be generated in the chat completion.  The total length of input tokens and generated tokens is limited by the model's context length. |
-| [Response Format](#text-generation-response-format) | `response-format` | object | Response format. |
-| Top P | `top-p` | number | An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.  We generally recommend altering this or `temperature` but not both.  |
+| Max Tokens | `max-tokens` | integer | The maximum number of tokens that can be generated in the chat completion. The total length of input tokens and generated tokens is limited by the model's context length. |
+| [Response Format](#text-generation-response-format) | `response-type` | object | Response format. |
+| Top P | `top-p` | number | An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. We generally recommend altering this or `temperature` but not both." |
 | Presence Penalty | `presence-penalty` | number | Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics. |
 | Frequency Penalty | `frequency-penalty` | number | Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim. |
+| [Prediction](#text-generation-prediction) | `prediction` | object | Configuration for a Predicted Output, which can greatly improve response times when large parts of the model response are known ahead of time. This is most common when you are regenerating a file with only minor changes to most of the content. |
+| [Tools](#text-generation-tools) | `tools` | array[object] | A list of tools the model may call. Currently, only functions are supported as a tool. Use this to provide a list of functions the model may generate JSON inputs for. A max of 128 functions are supported. |
+| Tool Choice | `tool-choice` | any | Controls which (if any) tool is called by the model. 'none' means the model will not call any tool and instead generates a message. 'auto' means the model can pick between generating a message or calling one or more tools. 'required' means the model must call one or more tools. |
+| Reasoning Effort | `reasoning-effort` | string | Constrains effort on reasoning for reasoning models. Currently supported values are minimal, low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`minimal`</li><li>`low`</li><li>`medium`</li><li>`high`</li></ul></details> |
+| Verbosity | `verbosity` | string | Constrains the verbosity of the model's response. Lower values will result in more concise responses, while higher values will result in more verbose responses. Currently supported values are low, <br/><details><summary><strong>Enum values</strong></summary><ul><li>`low`</li><li>`medium`</li><li>`high`</li></ul></details> |
+
 </div>
-
-
 <details>
 <summary> Input Objects in Text Generation</summary>
 
 <h4 id="text-generation-chat-history">Chat History</h4>
 
-Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be ignored and will not have any effect when this field is populated. Each message should adhere to the format \{"role": "The message role, i.e. 'system', 'user' or 'assistant'", "content": "message content"\}.
+Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be ignored and will not have any effect when this field is populated. Each message should adhere to the format `{"role": "The message role, i.e. ''system'', ''user'' or ''assistant''", "content": "message content"}`.
+
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| [Content](#text-generation-content) | `content` | array | The message content  |
-| Role | `role` | string | The message role, i.e. 'system', 'user' or 'assistant'  |
+| [Content](#text-generation-content) | `content` | array | The message content. |
+| Role | `role` | string | The message role, i.e. 'system', 'user' or 'assistant'. |
 </div>
 <h4 id="text-generation-content">Content</h4>
 
-The message content
+The message content.
+
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| [Image URL](#text-generation-image-url) | `image-url` | object | The image URL  |
-| Text | `text` | string | The text content.  |
-| Type | `type` | string | The type of the content part.  <br/><details><summary><strong>Enum values</strong></summary><ul><li>`text`</li><li>`image-url`</li></ul></details>  |
+| [Image URL](#text-generation-image-url) | `image-url` | object | The image URL |
+| Text | `text` | string | The text content. |
+| Type | `type` | string | The type of the content part. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`text`</li><li>`image-url`</li></ul></details> |
 </div>
 <h4 id="text-generation-image-url">Image URL</h4>
 
 The image URL
 
+
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| URL | `url` | string | Either a URL of the image or the base64 encoded image data.  |
+| URL | `url` | string | Either a URL of the image or the base64 encoded image data. |
+</div>
+<h4 id="text-generation-prediction">Prediction</h4>
+
+Configuration for a Predicted Output, which can greatly improve response times when large parts of the model response are known ahead of time. This is most common when you are regenerating a file with only minor changes to most of the content.
+
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Content | `content` | string | The content that should be matched when generating a model response. If generated tokens would match this content, the entire model response can be returned much more quickly. |
+</div>
+<h4 id="text-generation-tools">Tools</h4>
+
+A list of tools the model may call. Currently, only functions are supported as a tool. Use this to provide a list of functions the model may generate JSON inputs for. A max of 128 functions are supported.
+
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| [Function](#text-generation-function) | `function` | object | The function to call. |
+</div>
+<h4 id="text-generation-function">Function</h4>
+
+The function to call.
+
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Description | `description` | string | A description of what the function does, used by the model to choose when and how to call the function. |
+| Name | `name` | string | The name of the function to be called. Must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length of 64. |
+| Parameters | `parameters` | object | The parameters the functions accepts, described as a JSON Schema object. Omitting parameters defines a function with an empty parameter list. |
+| Strict | `strict` | boolean | Whether to enable strict schema adherence when generating the function call. If set to true, the model will follow the exact schema defined in the parameters field. |
 </div>
 </details>
-
 <details>
-<summary>The <code>response-format</code> Object </summary>
+<summary>The <code>response-type</code> Object </summary>
 
-<h4 id="text-generation-response-format">Response Format</h4>
+<h4 id="text-generation-response-type">Response Type</h4>
 
-`response-format` must fulfill one of the following schemas:
+`response-type` must fulfill one of the following schemas:
 
 <h5 id="text-generation-text"><code>Text</code></h5>
 
+
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Type | `type` | string |  Must be `"text"`   |
+| Type | `type` | string | Must be `"text"` |
 </div>
 
 <h5 id="text-generation-json-object"><code>JSON Object</code></h5>
 
+
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Type | `type` | string |  Must be `"json_object"`   |
+| Type | `type` | string | Must be `"json_object"` |
 </div>
 
 <h5 id="text-generation-json-schema"><code>JSON Schema</code></h5>
 
+
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| JSON Schema | `json-schema` | string |  Set up the schema of the structured output.  |
-| Type | `type` | string |  Must be `"json_schema"`   |
+| JSON Schema | `json-schema` | string | Set up the schema of the structured output. |
+| Type | `type` | string | Must be `"json_schema"` |
 </div>
 </details>
-
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Texts | `texts` | array[string] | Texts |
-| [Usage](#text-generation-usage) (optional) | `usage` | object | Usage statistics related to the query |
+| Texts | `texts` | array[string] | Texts. |
+| [Tool Calls](#text-generation-tool-calls) (optional) | `tool-calls` | array[object] | The tool calls generated by the model, such as function calls. |
+| [Usage](#text-generation-usage) (optional) | `usage` | object | Usage statistics related to the query. |
+
 </div>
+
 
 <details>
 <summary> Output Objects in Text Generation</summary>
+
+<h4 id="text-generation-tool-calls">Tool Calls</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| [Function](#text-generation-function) | `function` | object | The function that the model called. |
+| Type | `type` | string | The type of the tool. Currently, only function is supported. |
+
+</div>
+
+<h4 id="text-generation-function">Function</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Arguments | `arguments` | string | The arguments to call the function with, as generated by the model in JSON format. Note that the model does not always generate valid JSON, and may hallucinate parameters not defined by your function schema. Validate the arguments in your code before calling your function. |
+| Name | `name` | string | The name of the function to call. |
+
+</div>
 
 <h4 id="text-generation-usage">Usage</h4>
 
@@ -167,11 +228,39 @@ The image URL
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Completion tokens | `completion-tokens` | integer | Total number of tokens used (completion) |
-| Prompt tokens | `prompt-tokens` | integer | Total number of tokens used (prompt) |
-| Total tokens | `total-tokens` | integer | Total number of tokens used (prompt + completion) |
+| [Completion token details](#text-generation-completion-token-details) | `completion-token-details` | object | Breakdown of tokens used in a completion. |
+| Completion tokens | `completion-tokens` | integer | Total number of tokens used (completion). |
+| [Prompt token details](#text-generation-prompt-token-details) | `prompt-token-details` | object | Breakdown of tokens used in the prompt. |
+| Prompt tokens | `prompt-tokens` | integer | Total number of tokens used (prompt). |
+| Total tokens | `total-tokens` | integer | Total number of tokens used (prompt + completion). |
+
+</div>
+
+<h4 id="text-generation-prompt-token-details">Prompt Token Details</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Audio tokens | `audio-tokens` | integer | Audio input tokens present in the prompt. |
+| Cached tokens | `cached-tokens` | integer | Cached tokens present in the prompt. |
+
+</div>
+
+<h4 id="text-generation-completion-token-details">Completion Token Details</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Accepted prediction tokens | `accepted-prediction-tokens` | integer | When using Predicted Outputs, the number of tokens in the prediction that appeared in the completion. |
+| Audio tokens | `audio-tokens` | integer | Audio input tokens generated by the model. |
+| Reasoning tokens | `reasoning-tokens` | integer | Tokens generated by the model for reasoning. |
+| Rejected prediction tokens | `rejected-prediction-tokens` | integer | When using Predicted Outputs, the number of tokens in the prediction that did not appear in the completion. However, like reasoning tokens, these tokens are still counted in the total completion tokens for purposes of billing, output, and context window limits. |
+
 </div>
 </details>
+
 
 ### Text Embeddings
 
@@ -179,24 +268,22 @@ Turn text into numbers, unlocking use cases like search.
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_TEXT_EMBEDDINGS` |
-| Model (required) | `model` | string | ID of the model to use. |
-| Text (required) | `text` | string | The text |
+| Model (required) | `model` | string | ID of the model to use. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`text-embedding-ada-002`</li><li>`text-embedding-3-small`</li><li>`text-embedding-3-large`</li></ul></details> |
+| Text (required) | `text` | string | The text. |
 | Dimensions | `dimensions` | integer | The number of dimensions the resulting output embeddings should have. Only supported in text-embedding-3 and later models. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Embedding | `embedding` | array[number] | Embedding of the input text |
+| Embedding | `embedding` | array[number] | Embedding of the input text. |
+
 </div>
 
 ### Speech Recognition
@@ -205,26 +292,24 @@ Turn audio into text.
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_SPEECH_RECOGNITION` |
-| Model (required) | `model` | string | ID of the model to use. Only `whisper-1` is currently available.  |
-| Audio (required) | `audio` | string | The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.  |
-| Prompt | `prompt` | string | An optional text to guide the model's style or continue a previous audio segment. The prompt should match the audio language.  |
-| Language | `language` | string | The language of the input audio. Supplying the input language in <a href="https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes">ISO-639-1</a> format will improve accuracy and latency.  |
-| Temperature | `temperature` | number | The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use <a href="https://en.wikipedia.org/wiki/Log_probability">log probability</a> to automatically increase the temperature until certain thresholds are hit.  |
+| Model (required) | `model` | string | ID of the model to use. Only `whisper-1` is currently available. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`whisper-1`</li></ul></details> |
+| Audio (required) | `audio` | audio/* | The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm. |
+| Prompt | `prompt` | string | An optional text to guide the model's style or continue a previous audio segment. The prompt should match the audio language. |
+| Language | `language` | string | The language of the input audio. Supplying the input language in <a href="https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes">ISO-639-1</a> format will improve accuracy and latency. |
+| Temperature | `temperature` | number | The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use <a href="https://en.wikipedia.org/wiki/Log_probability">log probability</a> to automatically increase the temperature until certain thresholds are hit. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Text | `text` | string | Generated text |
+| Text | `text` | string | Generated text. |
+
 </div>
 
 ### Text to Speech
@@ -233,26 +318,24 @@ Turn text into lifelike spoken audio
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_TEXT_TO_SPEECH` |
-| Model (required) | `model` | string | One of the available TTS models: `tts-1` or `tts-1-hd`  |
+| Model (required) | `model` | string | One of the available TTS models: `tts-1` or `tts-1-hd`. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`tts-1`</li><li>`tts-1-hd`</li></ul></details> |
 | Text (required) | `text` | string | The text to generate audio for. The maximum length is 4096 characters. |
-| Voice (required) | `voice` | string | The voice to use when generating the audio. Supported voices are `alloy`, `echo`, `fable`, `onyx`, `nova`, and `shimmer`. |
-| Response Format | `response-format` | string | The format to audio in. Supported formats are `mp3`, `opus`, `aac`, and `flac`. |
+| Voice (required) | `voice` | string | The voice to use when generating the audio. Supported voices are `alloy`, `echo`, `fable`, `onyx`, `nova`, and `shimmer`. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`alloy`</li><li>`echo`</li><li>`fable`</li><li>`onyx`</li><li>`nova`</li><li>`shimmer`</li></ul></details> |
+| Response Format | `response-type` | string | The format to audio in. Supported formats are `mp3`, `opus`, `aac`, and `flac`. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`mp3`</li><li>`opus`</li><li>`aac`</li><li>`flac`</li></ul></details> |
 | Speed | `speed` | number | The speed of the generated audio. Select a value from `0.25` to `4.0`. `1.0` is the default. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Audio (optional) | `audio` | string | AI generated audio |
+| Audio (optional) | `audio` | audio/wav | AI generated audio. |
+
 </div>
 
 ### Text to Image
@@ -261,28 +344,27 @@ Generate or manipulate images with DALL·E.
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_TEXT_TO_IMAGE` |
-| Model (required) | `model` | string | The model to use for image generation. |
+| Model (required) | `model` | string | The model to use for image generation. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`dall-e-2`</li><li>`dall-e-3`</li></ul></details> |
 | Prompt (required) | `prompt` | string | A text description of the desired image(s). The maximum length is 1000 characters for `dall-e-2` and 4000 characters for `dall-e-3`. |
 | N | `n` | integer | The number of images to generate. Must be between 1 and 10. For `dall-e-3`, only `n=1` is supported. |
-| Quality | `quality` | string | The quality of the image that will be generated. `hd` creates images with finer details and greater consistency across the image. This param is only supported for `dall-e-3`. |
-| Size | `size` | string | The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024` for `dall-e-2`. Must be one of `1024x1024`, `1792x1024`, or `1024x1792` for `dall-e-3` models. |
-| N | `style` | string | The style of the generated images. Must be one of `vivid` or `natural`. Vivid causes the model to lean towards generating hyper-real and dramatic images. Natural causes the model to produce more natural, less hyper-real looking images. This param is only supported for `dall-e-3`. |
+| Quality | `quality` | string | The quality of the image that will be generated. `hd` creates images with finer details and greater consistency across the image. This param is only supported for `dall-e-3`. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`standard`</li><li>`hd`</li></ul></details> |
+| Size | `size` | string | The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024` for `dall-e-2`. Must be one of `1024x1024`, `1792x1024`, or `1024x1792` for `dall-e-3` models. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`256x256`</li><li>`512x512`</li><li>`1024x1024`</li><li>`1792x1024`</li><li>`1024x1792`</li></ul></details> |
+| N | `style` | string | The style of the generated images. Must be one of `vivid` or `natural`. Vivid causes the model to lean towards generating hyper-real and dramatic images. Natural causes the model to produce more natural, less hyper-real looking images. This param is only supported for `dall-e-3`. <br/><details><summary><strong>Enum values</strong></summary><ul><li>`vivid`</li><li>`natural`</li></ul></details> |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| [Images](#text-to-image-images) | `results` | array[object] | Generated results |
+| [Images](#text-to-image-images) | `results` | array[object] | Generated results. |
+
 </div>
+
 
 <details>
 <summary> Output Objects in Text to Image</summary>
@@ -293,15 +375,13 @@ Generate or manipulate images with DALL·E.
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Generated Image | `image` | string | Generated image |
-| Revised Prompt | `revised-prompt` | string | Revised prompt |
+| Generated Image | `image` | image/webp | Generated image. |
+| Revised Prompt | `revised-prompt` | string | Revised prompt. |
+
 </div>
 </details>
 
-
 ## Example Recipes
-
-Recipe for the [PicassoAI: Cubist Creations at Your Command!](https://instill.tech/instill-ai/pipelines/picasso-ai/playground) pipeline.
 
 ```yaml
 version: v1beta
@@ -357,24 +437,22 @@ variable:
   colour:
     title: Colour
     description: Describe the main colour to use i.e. blue, random
-    instill-format: string
+    type: string
     instill-ui-order: 1
   period:
     title: Period
     description: |
       Input different Picasso periods i.e. Blue, Rose, African, Synthetic Cubism, etc.
-    instill-format: string
+    type: string
   prompt:
     title: Prompt
     description: Input prompt here i.e. "A cute baby wombat"
-    instill-format: string
+    type: string
 output:
   image:
     title: Image
     value: ${openai-0.output.results}
 ```
-
-Recipe for the [Explain this topic to me in another language](https://instill.tech/instill-ai/pipelines/gpt-4o-mini-demo/playground) pipeline.
 
 ```yaml
 version: v1beta
@@ -399,11 +477,11 @@ variable:
   language:
     title: Language
     description: Input a language i.e. Chinese, Japanese, French, etc.
-    instill-format: string
+    type: string
   prompt:
     title: Prompt
     description: Write the topic you want to ask about here i.e. "Tell me about small LLMs"
-    instill-format: string
+    type: string
 output:
   result:
     title: Result

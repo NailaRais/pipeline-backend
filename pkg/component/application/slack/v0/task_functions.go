@@ -10,7 +10,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
-	"github.com/instill-ai/x/errmsg"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 type userInputReadTask struct {
@@ -162,12 +163,12 @@ func (e *execution) sendMessage(in *structpb.Struct) (*structpb.Struct, error) {
 		return nil, fmt.Errorf("converting task input: %w", err)
 	}
 
-	var client SlackClient
+	var client slackClient
 	switch {
 	case params.AsUser:
 		client = e.userClient
 		if client == nil {
-			return nil, errmsg.AddMessage(
+			return nil, errorsx.AddMessage(
 				fmt.Errorf("empty user token"),
 				"To send messages on behalf of the user, fill the user-token field in the component setup.",
 			)
@@ -181,7 +182,7 @@ func (e *execution) sendMessage(in *structpb.Struct) (*structpb.Struct, error) {
 		return nil, fmt.Errorf("fetching channel ID: %w", err)
 	}
 
-	message := strings.Replace(params.Message, "\\n", "\n", -1)
+	message := strings.ReplaceAll(params.Message, "\\n", "\n")
 	_, _, err = client.PostMessage(targetChannelID, slack.MsgOptionText(message, false))
 	if err != nil {
 		return nil, fmt.Errorf("posting message: %w", err)

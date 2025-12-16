@@ -1,33 +1,13 @@
 package resource
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/gofrs/uuid"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-// ExtractFromMetadata extracts context metadata given a key
-func ExtractFromMetadata(ctx context.Context, key string) ([]string, bool) {
-	data, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return []string{}, false
-	}
-	return data[strings.ToLower(key)], true
-}
-
-// GetRequestSingleHeader get a request header, the header has to be single-value HTTP header
-func GetRequestSingleHeader(ctx context.Context, header string) string {
-	metaHeader := metadata.ValueFromIncomingContext(ctx, strings.ToLower(header))
-	if len(metaHeader) != 1 {
-		return ""
-	}
-	return metaHeader[0]
-}
 
 // GetRscNameID returns the resource ID given a resource name
 func GetRscNameID(path string) (string, error) {
@@ -60,9 +40,9 @@ const (
 // doesn't matter whether the namespace belongs to a user or organization. This
 // refactor should be completed by August 2024.
 type Namespace struct {
-	NsType NamespaceType
-	NsID   string
-	NsUID  uuid.UUID
+	NsType NamespaceType `json:"__NamespaceType"`
+	NsID   string        `json:"__NamespaceID"`
+	NsUID  uuid.UUID     `json:"__NamespaceUID"`
 }
 
 func (ns Namespace) Name() string {

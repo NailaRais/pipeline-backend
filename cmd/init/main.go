@@ -5,10 +5,8 @@ import (
 	"log"
 
 	"github.com/redis/go-redis/v9"
-	"go.opentelemetry.io/otel"
 
 	"github.com/instill-ai/pipeline-backend/cmd/init/definitionupdater"
-	"github.com/instill-ai/pipeline-backend/cmd/init/presetdownloader"
 	"github.com/instill-ai/pipeline-backend/config"
 	"github.com/instill-ai/pipeline-backend/pkg/repository"
 
@@ -16,14 +14,12 @@ import (
 )
 
 func main() {
+
 	if err := config.Init(config.ParseConfigFlag()); err != nil {
 		log.Fatal(err.Error())
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx, span := otel.Tracer("init-tracer").Start(ctx,
-		"main",
-	)
-	defer span.End()
 	defer cancel()
 
 	db := database.GetConnection()
@@ -37,9 +33,6 @@ func main() {
 
 	repo := repository.NewRepository(db, redisClient)
 	if err := definitionupdater.UpdateComponentDefinitionIndex(ctx, repo); err != nil {
-		log.Fatal(err)
-	}
-	if err := presetdownloader.DownloadPresetPipelines(ctx, repo); err != nil {
 		log.Fatal(err)
 	}
 

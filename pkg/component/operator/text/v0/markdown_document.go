@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// This markdown document parser is used to build the document structure for the chunking process.
+
 // Document Implementation
 const (
 	ListStarters = "-*+"
@@ -169,7 +171,7 @@ func buildDocument(rawRunes []rune, previousDocument *MarkdownDocument, startPos
 				currentContent.Type = "plaintext"
 				currentContent.PlainText = block
 
-				currentContent.BlockStartPosition = currentPosition - sizeOfString(block) - 1
+				currentContent.BlockStartPosition = max(currentPosition-sizeOfString(block)-1, 0)
 				currentContent.BlockEndPosition = currentPosition
 				doc.Contents = append(doc.Contents, currentContent)
 			}
@@ -234,6 +236,7 @@ func readLine(rawRunes []rune, currentPosition *int) string {
 // Helper function to determine if a block is a table
 func isTable(block string) bool {
 	lines := strings.Split(block, "\n")
+	rowCount := 0
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
 		if len(trimmedLine) == 0 {
@@ -242,8 +245,9 @@ func isTable(block string) bool {
 		if !isRow(line) {
 			return false
 		}
+		rowCount++
 	}
-	return true
+	return rowCount > 1
 }
 
 // Helper function to determine if a line starts a table
@@ -314,13 +318,28 @@ func parseTableFromBlock(block string) Table {
 
 // List Section //
 // Helper function to determine if a block is a list
+
+// For list, it will be benefit for the users when the hierarchy is complicated.
+// So, to make the chunk logic clean, we won't judge the list as a list if the hierarchy is not too complicated.
+// Now, we temporarily set the hierarchy should be over 3 and the list count should be over 5.
+// If the list hierarchy is over 3 or the list count is over 5, we will judge it as a list.
+// If not, it will be judged as a plain text.
 func isList(block string) bool {
 	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		if i < 5 && isListStart(line) {
-			return true
+	listLevelCount := 0
+	listCount := 0
+
+	for _, line := range lines {
+		if isListStart(line) {
+			listCount++
+			listLevelCount += countIndent(line)
 		}
 	}
+
+	if listCount > 5 && listLevelCount > 3 {
+		return true
+	}
+
 	return false
 }
 
@@ -411,7 +430,15 @@ func countIndent(line string) int {
 // Helper function to determine if a line starts a list
 func isListStart(line string) bool {
 	trimmedLine := strings.TrimSpace(line)
-	return len(trimmedLine) > 0 && (strings.Contains(ListStarters, string(trimmedLine[0])) || isNumericList(trimmedLine))
+	if len(trimmedLine) == 0 {
+		return false
+	}
+	// If the start with 2 ListStarters in a row, it's not a list
+	// e.g. ** 1, ++ 1, -- 1 are not lists
+	if strings.HasPrefix(trimmedLine, "**") || strings.HasPrefix(trimmedLine, "++") || strings.HasPrefix(trimmedLine, "--") {
+		return false
+	}
+	return strings.Contains(ListStarters, string(trimmedLine[0])) || isNumericList(trimmedLine)
 }
 
 // Helper function to determine if a line starts a numeric list (e.g., "1. Item")

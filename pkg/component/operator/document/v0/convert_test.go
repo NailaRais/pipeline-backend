@@ -2,9 +2,6 @@ package document
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
-	"os"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -17,6 +14,14 @@ import (
 
 func TestConvertToText(t *testing.T) {
 	c := qt.New(t)
+	c.Parallel()
+
+	// Skip test if Python dependencies are not available
+	if !checkExternalDependency("python3") && !checkExternalDependency("python") {
+		c.Skip("Python not found, skipping test")
+		return
+	}
+
 	tests := []struct {
 		name     string
 		filepath string
@@ -28,20 +33,22 @@ func TestConvertToText(t *testing.T) {
 			expected: ConvertToTextOutput{
 				Body: "This is test file for markdown",
 				Meta: map[string]string{
-					"Encrypted":      "no",
-					"File size":      "15489 bytes",
-					"Form":           "none",
-					"JavaScript":     "no",
-					"Optimized":      "no",
-					"PDF version":    "1.4",
-					"Page rot":       "0",
-					"Page size":      "596 x 842 pts (A4)",
-					"Pages":          "1",
-					"Producer":       "Skia/PDF m128 Google Docs Renderer",
-					"Suspects":       "no",
-					"Tagged":         "no",
-					"Title":          "Untitled document",
-					"UserProperties": "no",
+					"Custom Metadata": "no",
+					"Encrypted":       "no",
+					"File size":       "15489 bytes",
+					"Form":            "none",
+					"JavaScript":      "no",
+					"Metadata Stream": "no",
+					"Optimized":       "no",
+					"PDF version":     "1.4",
+					"Page rot":        "0",
+					"Page size":       "596 x 842 pts (A4)",
+					"Pages":           "1",
+					"Producer":        "Skia/PDF m128 Google Docs Renderer",
+					"Suspects":        "no",
+					"Tagged":          "no",
+					"Title":           "Untitled document",
+					"UserProperties":  "no",
 				},
 				MSecs: 3,
 			},
@@ -59,13 +66,14 @@ func TestConvertToText(t *testing.T) {
 	bc := base.Component{}
 	for _, test := range tests {
 		c.Run(test.name, func(c *qt.C) {
+			c.Parallel()
+
 			component := Init(bc)
 			ctx := context.Background()
 
-			fileContent, err := os.ReadFile(test.filepath)
+			// Use cached file content for better performance
+			fileContent, err := getTestFileContent(test.filepath)
 			c.Assert(err, qt.IsNil)
-
-			base64DataURI := fmt.Sprintf("data:%s;base64,%s", mimeTypeByExtension(test.filepath), base64.StdEncoding.EncodeToString(fileContent))
 
 			execution, err := component.CreateExecution(base.ComponentExecution{
 				Component: component,
@@ -79,7 +87,7 @@ func TestConvertToText(t *testing.T) {
 				case *ConvertToTextInput:
 					*input = ConvertToTextInput{
 						Document: func() format.Document {
-							doc, err := data.NewDocumentFromURL(base64DataURI)
+							doc, err := data.NewDocumentFromBytes(fileContent, mimeTypeByExtension(test.filepath), "")
 							if err != nil {
 								return nil
 							}

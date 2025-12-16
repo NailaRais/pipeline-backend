@@ -1,5 +1,571 @@
 # Changelog
 
+## [0.61.0](https://github.com/instill-ai/pipeline-backend/compare/v0.60.0...v0.61.0) (2025-10-07)
+
+
+### Features
+
+* **component,ai,gemini:** add image generation support ([#1122](https://github.com/instill-ai/pipeline-backend/issues/1122)) ([d986614](https://github.com/instill-ai/pipeline-backend/commit/d986614184cf969208f82b529c4d07f624ab7907))
+* **component,ai,gemini:** add multimedia support with unified format… ([#1114](https://github.com/instill-ai/pipeline-backend/issues/1114)) ([291b379](https://github.com/instill-ai/pipeline-backend/commit/291b379d4b9c29946a5f3dd566397574400b58f4))
+* **component,ai,gemini:** add text embeddings task support ([#1129](https://github.com/instill-ai/pipeline-backend/issues/1129)) ([d7ca6cf](https://github.com/instill-ai/pipeline-backend/commit/d7ca6cf8fb0015393e05a22eeaa221942bdf03fd))
+* **component,ai,gemini:** enhance streaming to output all fields ([#1106](https://github.com/instill-ai/pipeline-backend/issues/1106)) ([dfb6b24](https://github.com/instill-ai/pipeline-backend/commit/dfb6b247a1cad692854be45da4eed92de2b23bc8))
+* **component,ai,gemini:** implement automatic format conversion for unsupported media types ([#1128](https://github.com/instill-ai/pipeline-backend/issues/1128)) ([f767b8a](https://github.com/instill-ai/pipeline-backend/commit/f767b8a95235e8f89290472e4919d2998b740d7b))
+* **component,ai,gemini:** implement File API support for large files… ([#1118](https://github.com/instill-ai/pipeline-backend/issues/1118)) ([b51c8f4](https://github.com/instill-ai/pipeline-backend/commit/b51c8f4c2040c914bf9e950c2001b650e6a852e4))
+* **data:** add comprehensive AVIF image format support ([#1135](https://github.com/instill-ai/pipeline-backend/issues/1135)) ([76d6941](https://github.com/instill-ai/pipeline-backend/commit/76d6941ac25da5717a9af516cd24730ab1410c7e))
+* **data:** add HEIC/HEIF image support and normalize MIME types ([#1127](https://github.com/instill-ai/pipeline-backend/issues/1127)) ([2dfa254](https://github.com/instill-ai/pipeline-backend/commit/2dfa254fc7d185d2e96a982ae93ade7e9355e789))
+* **data:** enhance unmarshaler with JSON string to struct conversion ([#1116](https://github.com/instill-ai/pipeline-backend/issues/1116)) ([9e06b7c](https://github.com/instill-ai/pipeline-backend/commit/9e06b7c12a5942e6a1ca50c8980fc16d184128ab))
+* **data:** implement time types support with pattern validation ([#1115](https://github.com/instill-ai/pipeline-backend/issues/1115)) ([79630c0](https://github.com/instill-ai/pipeline-backend/commit/79630c0b3056aae21f47ae08c6e9e75d4071c98d))
+
+
+### Bug Fixes
+
+* **compogen:** escape curly braces for readme.com compatibility ([#1124](https://github.com/instill-ai/pipeline-backend/issues/1124)) ([904992d](https://github.com/instill-ai/pipeline-backend/commit/904992d509cf5d08ec8b230b58b17977159fb9ac))
+* **component,ai,gemini:** add operation validation for cache task ([#1130](https://github.com/instill-ai/pipeline-backend/issues/1130)) ([9e19255](https://github.com/instill-ai/pipeline-backend/commit/9e1925524d78e1dd6582ad67cd1cb9cf10ee2056))
+* **component,ai,gemini:** correct text-based documents logic ([#1103](https://github.com/instill-ai/pipeline-backend/issues/1103)) ([ed5a111](https://github.com/instill-ai/pipeline-backend/commit/ed5a11167f6b9a39c35e3646372752bfc9af06d0))
+* **component,ai,gemini:** unify InlineData processing and enable images in streaming responses ([#1125](https://github.com/instill-ai/pipeline-backend/issues/1125)) ([3117046](https://github.com/instill-ai/pipeline-backend/commit/311704698553bd2abfa9e8faa77f8a699edc071b))
+* **component,document:** fix incorrect expected value in the unit test ([#1138](https://github.com/instill-ai/pipeline-backend/issues/1138)) ([189dbd6](https://github.com/instill-ai/pipeline-backend/commit/189dbd6bf16bb95cfe3fe5f905b18020053573e4))
+* **data:** remove duplicate dot in generated filenames ([#1136](https://github.com/instill-ai/pipeline-backend/issues/1136)) ([0a74a00](https://github.com/instill-ai/pipeline-backend/commit/0a74a00c36fb6db5bdcaa5439469da33ed63020c))
+* **external:** fix Content-Disposition header parsing for filename extraction ([#1132](https://github.com/instill-ai/pipeline-backend/issues/1132)) ([869b081](https://github.com/instill-ai/pipeline-backend/commit/869b081e0c3a4022a11dcb65765ae8ef8c74965f))
+* **service:** handle null JSON metadata in pipeline conversion ([#1134](https://github.com/instill-ai/pipeline-backend/issues/1134)) ([b244784](https://github.com/instill-ai/pipeline-backend/commit/b2447846277723df0df5938324d3ccac4c8480b5))
+* **text:** correct positions on duplicate markdown chunks ([#1120](https://github.com/instill-ai/pipeline-backend/issues/1120)) ([1b4cd1f](https://github.com/instill-ai/pipeline-backend/commit/1b4cd1f0a8236c07bfb58117dfb1e692b90b14d1))
+* **usage:** add missing error filtering for users/admin ([#1119](https://github.com/instill-ai/pipeline-backend/issues/1119)) ([cd1bd55](https://github.com/instill-ai/pipeline-backend/commit/cd1bd55680d69b0a6541e3c34058cb49c0af2aa6))
+
+
+### Miscellaneous
+
+* release v0.61.0 ([e1db93c](https://github.com/instill-ai/pipeline-backend/commit/e1db93c2f5563f6c1caf1f34309ccff5d46a9a54))
+
+
+### Refactor
+
+* **component,ai,gemini:** merge usage and usage-metadata fields into single usage field ([#1126](https://github.com/instill-ai/pipeline-backend/issues/1126)) ([a6046cd](https://github.com/instill-ai/pipeline-backend/commit/a6046cd151c9d1db6ab33ef67f5bb547d3cbc461))
+* **component,ai.gemini:** standardize file api timeout and use native embedding type ([#1133](https://github.com/instill-ai/pipeline-backend/issues/1133)) ([174f7d6](https://github.com/instill-ai/pipeline-backend/commit/174f7d63f821cc4bd0f60616d0cbaead3ca5794d))
+* **component,generic,http:** move test functions to test files and improve code legibility ([#1131](https://github.com/instill-ai/pipeline-backend/issues/1131)) ([1153a09](https://github.com/instill-ai/pipeline-backend/commit/1153a09aa3d51657372f25bb010e4ba8e31d591a))
+* **component,generic,http:** replace env-based URL validation with constructor injection ([#1121](https://github.com/instill-ai/pipeline-backend/issues/1121)) ([f1f7d2f](https://github.com/instill-ai/pipeline-backend/commit/f1f7d2f2620ffc6356612797212ff041d599b439))
+
+
+### Tests
+
+* **component,generic,http:** replace external httpbin.org dependency with local test server ([#1101](https://github.com/instill-ai/pipeline-backend/issues/1101)) ([a82d155](https://github.com/instill-ai/pipeline-backend/commit/a82d155cf986f23996187881abca11852b6d7283))
+
+## [0.60.0](https://github.com/instill-ai/pipeline-backend/compare/v0.59.2...v0.60.0) (2025-09-18)
+
+
+### Features
+
+* **artifact:** expose chunk file reference in search task ([#1085](https://github.com/instill-ai/pipeline-backend/issues/1085)) ([39bbe95](https://github.com/instill-ai/pipeline-backend/commit/39bbe958ffd792ceed1c8443c14d2e0c7bfd6b71))
+* **component,ai:** add Gemini integration ([#1088](https://github.com/instill-ai/pipeline-backend/issues/1088)) ([cea127a](https://github.com/instill-ai/pipeline-backend/commit/cea127ad207f71e24db5194c4e32592cd87e01eb))
+* **component,cohere:** add rerank indexes in the response ([#1087](https://github.com/instill-ai/pipeline-backend/issues/1087)) ([fe6366a](https://github.com/instill-ai/pipeline-backend/commit/fe6366a14a079920753b7888773198435fea7916))
+
+
+### Bug Fixes
+
+* **compogen:** remove redundant escape characters ([#1089](https://github.com/instill-ai/pipeline-backend/issues/1089)) ([9d21061](https://github.com/instill-ai/pipeline-backend/commit/9d21061e18d17b4544d10c4719feedef9a892a7a))
+* **component,ai,instillmodel:** fix outdated data struct ([#1095](https://github.com/instill-ai/pipeline-backend/issues/1095)) ([c81f59c](https://github.com/instill-ai/pipeline-backend/commit/c81f59ce720950b667de9a1e97c3607362c42c95))
+* **component,ai,instillmodel:** resolve panics and test failures ([#1100](https://github.com/instill-ai/pipeline-backend/issues/1100)) ([34fc930](https://github.com/instill-ai/pipeline-backend/commit/34fc9307fdb08b83b664393d7448b3078d0e60c9))
+* **recipe:** support nil, null, undefined for condition field ([#1091](https://github.com/instill-ai/pipeline-backend/issues/1091)) ([a249070](https://github.com/instill-ai/pipeline-backend/commit/a249070ba2f7a399b3312933072a125987fcbf66))
+* **usage:** treat input rendering error as fatal ([#1098](https://github.com/instill-ai/pipeline-backend/issues/1098)) ([06c8025](https://github.com/instill-ai/pipeline-backend/commit/06c8025ecc35774cf3cc2959546cb42c5c49caab))
+
+
+### Miscellaneous
+
+* **ce:** release v0.60.0 ([#1099](https://github.com/instill-ai/pipeline-backend/issues/1099)) ([09c5c0f](https://github.com/instill-ai/pipeline-backend/commit/09c5c0fa812f9a87c9a8abdc6596f9f3e1effea9))
+* **compogen:** update component document layout ([#1090](https://github.com/instill-ai/pipeline-backend/issues/1090)) ([5613ee3](https://github.com/instill-ai/pipeline-backend/commit/5613ee3a2447170e4ca35ca2462cb58281677a2d))
+* **component,ai:** remove unused files ([#1094](https://github.com/instill-ai/pipeline-backend/issues/1094)) ([11b0f4a](https://github.com/instill-ai/pipeline-backend/commit/11b0f4af3622ff5183b7a372467efbff6b324af6))
+* **component,gemini:** optimize the IO struct ([#1092](https://github.com/instill-ai/pipeline-backend/issues/1092)) ([a0772d2](https://github.com/instill-ai/pipeline-backend/commit/a0772d2b040229b2156c3de54314692f7187534e))
+* **data,component,gemini:** improve error msg ([#1093](https://github.com/instill-ai/pipeline-backend/issues/1093)) ([c2ea248](https://github.com/instill-ai/pipeline-backend/commit/c2ea248920a32b0bbe805e24d304a545b30edc08))
+* **data:** improve unified Instill Type data presentation ([#1078](https://github.com/instill-ai/pipeline-backend/issues/1078)) ([abcccd6](https://github.com/instill-ai/pipeline-backend/commit/abcccd6ed0629d9a9b8c0fa16ba53ed3aea0d866))
+
+
+### Documentation
+
+* **component:** update description format ([#1084](https://github.com/instill-ai/pipeline-backend/issues/1084)) ([faaaed0](https://github.com/instill-ai/pipeline-backend/commit/faaaed0773a20914e43894903da8501449456ee6))
+
+
+### Refactor
+
+* **component,ai,gemini:** enhance document processing with text … ([#1097](https://github.com/instill-ai/pipeline-backend/issues/1097)) ([38639c6](https://github.com/instill-ai/pipeline-backend/commit/38639c6bb767403f094f32ad48f99698e84ff965))
+
+
+### Tests
+
+* **integration:** tinker script ([#1083](https://github.com/instill-ai/pipeline-backend/issues/1083)) ([1712bb6](https://github.com/instill-ai/pipeline-backend/commit/1712bb6cb06f607b1079af258c9313afbd068535))
+
+## [0.59.2](https://github.com/instill-ai/pipeline-backend/compare/v0.59.1...v0.59.2) (2025-09-09)
+
+
+### Miscellaneous
+
+* **component-run:** make input and output blob paths consistent ([#1079](https://github.com/instill-ai/pipeline-backend/issues/1079)) ([58a01dc](https://github.com/instill-ai/pipeline-backend/commit/58a01dcbc0bdae4ba8c09386a7b0f3d0111b7635))
+* **x:** update x to v0.10.0-alpha ([#1081](https://github.com/instill-ai/pipeline-backend/issues/1081)) ([6fae5fa](https://github.com/instill-ai/pipeline-backend/commit/6fae5fab187759553d6c4d19b1f761a4ea987ea2))
+
+## [0.59.1](https://github.com/instill-ai/pipeline-backend/compare/v0.59.0...v0.59.1) (2025-09-02)
+
+
+### Bug Fixes
+
+* **log:** fix permission check for run logs ([#1076](https://github.com/instill-ai/pipeline-backend/issues/1076)) ([0757c79](https://github.com/instill-ai/pipeline-backend/commit/0757c7986d03ed6eed18b85b9b7b09a6c19cf64f))
+* **type,document:** fix .doc OLE format ([#1075](https://github.com/instill-ai/pipeline-backend/issues/1075)) ([f541948](https://github.com/instill-ai/pipeline-backend/commit/f541948e2f58eee22e8a25e71080041e7ade832b))
+
+
+### Documentation
+
+* **component:** fix broken links ([#1074](https://github.com/instill-ai/pipeline-backend/issues/1074)) ([0dafd56](https://github.com/instill-ai/pipeline-backend/commit/0dafd56ccb5be7a31e1659c824a1b561bb00302f))
+
+## [0.59.0](https://github.com/instill-ai/pipeline-backend/compare/v0.58.4...v0.59.0) (2025-08-26)
+
+
+### Features
+
+* **artifact:** allow search and query tasks to filter by several files ([#1069](https://github.com/instill-ai/pipeline-backend/issues/1069)) ([8b212fe](https://github.com/instill-ai/pipeline-backend/commit/8b212fe38e7a987cd6d08b363df5ab27749a149a))
+* **minio:** use new bucket names ([#1071](https://github.com/instill-ai/pipeline-backend/issues/1071)) ([c40fbed](https://github.com/instill-ai/pipeline-backend/commit/c40fbedd63257adcf7369c5d4b794b792bbbb707))
+
+
+### Bug Fixes
+
+* **run:** return correct total duration ([#1072](https://github.com/instill-ai/pipeline-backend/issues/1072)) ([5a15c45](https://github.com/instill-ai/pipeline-backend/commit/5a15c45aef907263691f695482d9ed549bd465d7))
+
+
+### Miscellaneous
+
+* release v0.59.0 ([#1073](https://github.com/instill-ai/pipeline-backend/issues/1073)) ([143fd2b](https://github.com/instill-ai/pipeline-backend/commit/143fd2be031bfcf0283d3193466bfb36319dcb06))
+
+## [0.58.4](https://github.com/instill-ai/pipeline-backend/compare/v0.58.3...v0.58.4) (2025-08-08)
+
+
+### Features
+
+* **component,openai:** add reasoning-effort and verbosity fields ([#1067](https://github.com/instill-ai/pipeline-backend/issues/1067)) ([d2f0f87](https://github.com/instill-ai/pipeline-backend/commit/d2f0f876f3f8fb09355b280abda6e0e336778514))
+
+## [0.58.3](https://github.com/instill-ai/pipeline-backend/compare/v0.58.2...v0.58.3) (2025-08-07)
+
+
+### Bug Fixes
+
+* **component,googlesheets:** fix the wrong cell type ([#1065](https://github.com/instill-ai/pipeline-backend/issues/1065)) ([3ee8ba8](https://github.com/instill-ai/pipeline-backend/commit/3ee8ba8daef19982fc7f6a9ef46156d918cccdc0))
+
+## [0.58.2](https://github.com/instill-ai/pipeline-backend/compare/v0.58.1...v0.58.2) (2025-08-07)
+
+
+### Features
+
+* **temporal:** remove Temporal namespace initialization ([#1059](https://github.com/instill-ai/pipeline-backend/issues/1059)) ([c940fa0](https://github.com/instill-ai/pipeline-backend/commit/c940fa0e4e1ea84335c8c1e82dfbd1d08a9fde94))
+
+
+### Bug Fixes
+
+* **component,googlesheets:** fix the wrong cell positions ([#1064](https://github.com/instill-ai/pipeline-backend/issues/1064)) ([d4de9e4](https://github.com/instill-ai/pipeline-backend/commit/d4de9e4a019023b596d26595fa96887ba16c025a))
+
+## [0.58.1](https://github.com/instill-ai/pipeline-backend/compare/v0.58.0...v0.58.1) (2025-08-04)
+
+
+### Features
+
+* **component,perplexity:** adopt latest perplexity API ([#1060](https://github.com/instill-ai/pipeline-backend/issues/1060)) ([bc8a2b0](https://github.com/instill-ai/pipeline-backend/commit/bc8a2b0eb2d6446bcb481767b9854cb275f4a68a))
+
+## [0.58.0](https://github.com/instill-ai/pipeline-backend/compare/v0.57.0...v0.58.0) (2025-07-31)
+
+
+### Bug Fixes
+
+* **cmd:** move Temporal namespace creation to cmd/init ([#1053](https://github.com/instill-ai/pipeline-backend/issues/1053)) ([11c6847](https://github.com/instill-ai/pipeline-backend/commit/11c6847609d0f85ee904e5c4982e11c5f0bd2c89))
+* **component:** fix missing propagation of original request header instill-artifact component ([#1056](https://github.com/instill-ai/pipeline-backend/issues/1056)) ([2b9f265](https://github.com/instill-ai/pipeline-backend/commit/2b9f265aea2e1aa938cb3e990e2af32a9ee747b5))
+
+
+### Miscellaneous
+
+* **otel,config:** fix missing settings and configs ([#1057](https://github.com/instill-ai/pipeline-backend/issues/1057)) ([d8d99b2](https://github.com/instill-ai/pipeline-backend/commit/d8d99b22b0d3297e1d6a4a30a89436dc5046d2c9))
+* release v0.58.0 ([4efe51a](https://github.com/instill-ai/pipeline-backend/commit/4efe51a6b409893dd9001ccc398ec464bded7d03))
+
+## [0.57.0](https://github.com/instill-ai/pipeline-backend/compare/v0.56.0...v0.57.0) (2025-07-16)
+
+
+### Features
+
+* **artifact:** add file UID param in retrieval task ([#1046](https://github.com/instill-ai/pipeline-backend/issues/1046)) ([df241f5](https://github.com/instill-ai/pipeline-backend/commit/df241f514304f7d0abd79b8ed4c97c3b0b9c0a37))
+* **component:** retire openai.v1 and universal-ai component ([#1042](https://github.com/instill-ai/pipeline-backend/issues/1042)) ([d332bbe](https://github.com/instill-ai/pipeline-backend/commit/d332bbe87fba2114b4c38ad3d384546a89673646))
+* **external:** support new blob-url path in artifactBinaryFetcher ([#1037](https://github.com/instill-ai/pipeline-backend/issues/1037)) ([11a5d16](https://github.com/instill-ai/pipeline-backend/commit/11a5d16057f5b4dd775e4348265a2c671560e62a))
+* **otel:** integrate OTEL using gRPC interceptor ([#1050](https://github.com/instill-ai/pipeline-backend/issues/1050)) ([70edddd](https://github.com/instill-ai/pipeline-backend/commit/70edddd40d249d58584b678b511e2cedbe4a91b3))
+
+
+### Bug Fixes
+
+* **external:** use URLEncoding to decode blob URL ([#1047](https://github.com/instill-ai/pipeline-backend/issues/1047)) ([893cf5b](https://github.com/instill-ai/pipeline-backend/commit/893cf5b797d27bc2a0532eb838b4bf73da0a087c))
+* **init:** remove components from the database if they no longer exist in the definition list ([#1049](https://github.com/instill-ai/pipeline-backend/issues/1049)) ([82fe19d](https://github.com/instill-ai/pipeline-backend/commit/82fe19df724d24e61af4b613a5d83bc8ee39295c))
+
+
+### Miscellaneous
+
+* **dep:** bump up usage-client version ([#1043](https://github.com/instill-ai/pipeline-backend/issues/1043)) ([f357f03](https://github.com/instill-ai/pipeline-backend/commit/f357f035ebc5c83159c5bf6ec25a184e79cc400a))
+* **deps:** bump github.com/go-chi/chi/v5 from 5.2.1 to 5.2.2 ([#1030](https://github.com/instill-ai/pipeline-backend/issues/1030)) ([6ad1380](https://github.com/instill-ai/pipeline-backend/commit/6ad138028e58cebe04db14b9846cc10ac3e87034))
+* release v0.57.0 ([5789441](https://github.com/instill-ai/pipeline-backend/commit/5789441fa53d9dd930518902eb47b2b4ad9ea985))
+
+
+### Refactor
+
+* **main:** align backend codebase ([#1048](https://github.com/instill-ai/pipeline-backend/issues/1048)) ([9de0b03](https://github.com/instill-ai/pipeline-backend/commit/9de0b039b9618a760fcb9114e03b819ff4306322))
+
+## [0.56.0](https://github.com/instill-ai/pipeline-backend/compare/v0.55.0...v0.56.0) (2025-07-01)
+
+
+### Features
+
+* **document:** add TASK_SPLIT_IN_PAGES ([#1035](https://github.com/instill-ai/pipeline-backend/issues/1035)) ([3bcb944](https://github.com/instill-ai/pipeline-backend/commit/3bcb94455c7c142ea8844c5013c795b76d011a6c))
+* **http:** add header parameter in HTTP component ([#1028](https://github.com/instill-ai/pipeline-backend/issues/1028)) ([64d0807](https://github.com/instill-ai/pipeline-backend/commit/64d0807d0152876bad5164687f0447366e7a6ac1))
+
+
+### Bug Fixes
+
+* **component,document:** fix the wrong python script output parsing ([#1031](https://github.com/instill-ai/pipeline-backend/issues/1031)) ([b306708](https://github.com/instill-ai/pipeline-backend/commit/b306708cf7ca794a58ae5c97ed3c0051f037c8d0))
+* **Dockerfile:** correct serviceVersion injection ([#1036](https://github.com/instill-ai/pipeline-backend/issues/1036)) ([61573ac](https://github.com/instill-ai/pipeline-backend/commit/61573ac1961e92645254a706b0a747c6f6f98a47))
+* **document:** make Python scripts fail silently on document-to-markdown conversion ([#1032](https://github.com/instill-ai/pipeline-backend/issues/1032)) ([8b97006](https://github.com/instill-ai/pipeline-backend/commit/8b97006ec422013f75712d88f1ea82b3c4112fed))
+
+
+### Miscellaneous
+
+* **http:** block internal endpoints in HTTP component. ([#1033](https://github.com/instill-ai/pipeline-backend/issues/1033)) ([dff15b1](https://github.com/instill-ai/pipeline-backend/commit/dff15b1abfbc6514d110401c57cbccca6be3fc37))
+* **main:** release v0.56.0 ([713e079](https://github.com/instill-ai/pipeline-backend/commit/713e079a02a0b71459e7290bd04df2b367dfcd95))
+* **main:** release v0.56.0 ([#1039](https://github.com/instill-ai/pipeline-backend/issues/1039)) ([2273d5b](https://github.com/instill-ai/pipeline-backend/commit/2273d5bbcaa1686b31c1e26b9e906acc64c96c91))
+
+## [0.55.0](https://github.com/instill-ai/pipeline-backend/compare/v0.54.0-rc...v0.55.0) (2025-06-18)
+
+
+### Bug Fixes
+
+* **component,http:** fix incorrect marshaling in the request body ([#1022](https://github.com/instill-ai/pipeline-backend/issues/1022)) ([1f19681](https://github.com/instill-ai/pipeline-backend/commit/1f19681974d1a819478b02f01a5c331e18321481))
+* **component,openai:** resize the image before sending to OpenAI ([#1020](https://github.com/instill-ai/pipeline-backend/issues/1020)) ([0a65d6b](https://github.com/instill-ai/pipeline-backend/commit/0a65d6bf206ac31b93e44ac80b415b2a3849ac2b))
+
+
+### Miscellaneous
+
+* **config:** update config.json ([#1018](https://github.com/instill-ai/pipeline-backend/issues/1018)) ([56d80d6](https://github.com/instill-ai/pipeline-backend/commit/56d80d6d4054126b9a3c293196dec56855955b7a))
+* **proto:** adopt latest `protogen-go` package ([#1024](https://github.com/instill-ai/pipeline-backend/issues/1024)) ([427598d](https://github.com/instill-ai/pipeline-backend/commit/427598d3c1bb3aa025a3fd0870bb491784612b36))
+* release v0.55.0 ([3b516e0](https://github.com/instill-ai/pipeline-backend/commit/3b516e04aa4d1095c3cc93e9723e582a4b7b4d39))
+* release v0.55.0 ([2cfa80c](https://github.com/instill-ai/pipeline-backend/commit/2cfa80c3203e08a72024f3454e3a7f4a3b01de8c))
+
+
+### Documentation
+
+* **CONTRIBUTING:** update content ([#1027](https://github.com/instill-ai/pipeline-backend/issues/1027)) ([3b84ff0](https://github.com/instill-ai/pipeline-backend/commit/3b84ff05fea11f379b05dfc4c1d2a0643d3b017d))
+
+## [0.54.0-rc](https://github.com/instill-ai/pipeline-backend/compare/v0.53.0-beta...v0.54.0-rc) (2025-06-06)
+
+
+### Features
+
+* **iterator:** execute elements in iterator concurrently ([#1014](https://github.com/instill-ai/pipeline-backend/issues/1014)) ([25b3a35](https://github.com/instill-ai/pipeline-backend/commit/25b3a35b147a3a915b9283fe4108465a8ae87be1))
+
+
+### Miscellaneous Chores
+
+* **main:** release v0.45.0-rc ([#1016](https://github.com/instill-ai/pipeline-backend/issues/1016)) ([04d53cb](https://github.com/instill-ai/pipeline-backend/commit/04d53cbfad651c8bbd16f839c4f90ea866610f65))
+* **main:** release v0.54.0-rc ([#1017](https://github.com/instill-ai/pipeline-backend/issues/1017)) ([3ab7010](https://github.com/instill-ai/pipeline-backend/commit/3ab7010aebde8b7e4a3bcbe59a7033a329a5199a))
+
+## [0.53.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.5-beta...v0.53.0-beta) (2025-06-03)
+
+
+### Features
+
+* **temporal:** propagate request metadata to Temporal headers ([#1009](https://github.com/instill-ai/pipeline-backend/issues/1009)) ([0e90a99](https://github.com/instill-ai/pipeline-backend/commit/0e90a99775e7e69990b979817a94b386a15432bf))
+
+
+### Bug Fixes
+
+* **worker:** catch the error when creating Temporal session failed ([#1011](https://github.com/instill-ai/pipeline-backend/issues/1011)) ([d238d3b](https://github.com/instill-ai/pipeline-backend/commit/d238d3b4821459e425639d7355096bedc27ddea4))
+
+## [0.52.5-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.4-beta...v0.52.5-beta) (2025-05-14)
+
+
+### Bug Fixes
+
+* **component-run:** set component status when execution failed ([#1008](https://github.com/instill-ai/pipeline-backend/issues/1008)) ([2addf5b](https://github.com/instill-ai/pipeline-backend/commit/2addf5b03ffcf439c1509011ce48d172077ecf0b))
+* **component,audio:** fix wrong instill type ([#1005](https://github.com/instill-ai/pipeline-backend/issues/1005)) ([b999cf4](https://github.com/instill-ai/pipeline-backend/commit/b999cf4b7f2981cd2a72049c7091752bb7c55d1e))
+
+## [0.52.4-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.3-beta...v0.52.4-beta) (2025-04-24)
+
+
+### Bug Fixes
+
+* **component,openai:** remove response format check ([#1003](https://github.com/instill-ai/pipeline-backend/issues/1003)) ([c6d02eb](https://github.com/instill-ai/pipeline-backend/commit/c6d02eb8e879a6888e66d7a422f78d353ae87a80))
+
+## [0.52.3-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.2-beta...v0.52.3-beta) (2025-04-24)
+
+
+### Bug Fixes
+
+* **component,artifact:** remove duplicated connection close ([#1001](https://github.com/instill-ai/pipeline-backend/issues/1001)) ([6e98c0e](https://github.com/instill-ai/pipeline-backend/commit/6e98c0ed421a2b65409615cbca04cc7dde517b5f))
+
+## [0.52.2-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.1-beta...v0.52.2-beta) (2025-04-10)
+
+
+### Bug Fixes
+
+* **iterator:** always initialize pipeline output template ([#997](https://github.com/instill-ai/pipeline-backend/issues/997)) ([3020465](https://github.com/instill-ai/pipeline-backend/commit/3020465c7ccee23c6729d2a41601c04a67ae03e6))
+
+## [0.52.1-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.52.0-beta...v0.52.1-beta) (2025-04-01)
+
+
+### Bug Fixes
+
+* **component:** make component definition response compatiable with Console ([#995](https://github.com/instill-ai/pipeline-backend/issues/995)) ([9e4286c](https://github.com/instill-ai/pipeline-backend/commit/9e4286c5e31a39115fe58bdfe3990c05a4e522b1))
+
+## [0.52.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.51.0-beta...v0.52.0-beta) (2025-03-28)
+
+
+### Features
+
+* **memory:** remove recipe from in-process memory ([#984](https://github.com/instill-ai/pipeline-backend/issues/984)) ([ca57ca8](https://github.com/instill-ai/pipeline-backend/commit/ca57ca82ea4550f2d0fc0d0c997184bdb376d3f9))
+* **streaming:** use Redis pub/sub to stream pipeline triggers ([#981](https://github.com/instill-ai/pipeline-backend/issues/981)) ([80b7f17](https://github.com/instill-ai/pipeline-backend/commit/80b7f17eab2cb22fba7353101bb8313ec10b6294))
+* **trigger:** use MinIO to store workflow memory ([#986](https://github.com/instill-ai/pipeline-backend/issues/986)) ([fc36c6c](https://github.com/instill-ai/pipeline-backend/commit/fc36c6c2d833a0882d47439600f35cfd35a6a053))
+* **worker:** emit Temporal SDK metrics ([#990](https://github.com/instill-ai/pipeline-backend/issues/990)) ([1be2b44](https://github.com/instill-ai/pipeline-backend/commit/1be2b4427d8aa3d453a17bea6cf07a4a6a1c4c76))
+* **worker:** extract worker back to its own process ([#987](https://github.com/instill-ai/pipeline-backend/issues/987)) ([8925b0f](https://github.com/instill-ai/pipeline-backend/commit/8925b0f0fb4efcfb24e06be411ace3c5233356be))
+
+
+### Bug Fixes
+
+* **ci:** optimize disk usage in coverage worklfow ([#982](https://github.com/instill-ai/pipeline-backend/issues/982)) ([f8f2707](https://github.com/instill-ai/pipeline-backend/commit/f8f2707e96abcd9587fbc99e992ac057a368f753))
+* **component,document:** fix the document cannot be converted to an image ([#994](https://github.com/instill-ai/pipeline-backend/issues/994)) ([22e879f](https://github.com/instill-ai/pipeline-backend/commit/22e879f0b11185912bdfd5f92e401256efdf7443))
+* **worker:** use pipeline server host in pipeline client ([#989](https://github.com/instill-ai/pipeline-backend/issues/989)) ([06e2a9d](https://github.com/instill-ai/pipeline-backend/commit/06e2a9deebb40c0015cdffbe3f311b28c4331f3f))
+
+## [0.51.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.50.0-beta...v0.51.0-beta) (2025-02-25)
+
+
+### Features
+
+* **all:** rename VDP to pipeline ([#963](https://github.com/instill-ai/pipeline-backend/issues/963)) ([8ba570a](https://github.com/instill-ai/pipeline-backend/commit/8ba570ae4013d78e1454be4725211c9539b53b3f))
+* **component:** support metadata filter in artifact component ([#979](https://github.com/instill-ai/pipeline-backend/issues/979)) ([624029a](https://github.com/instill-ai/pipeline-backend/commit/624029a8db9f2070ed54d429936eae54f5a33b31))
+* **Docling:** prefetch model artifacts ([#964](https://github.com/instill-ai/pipeline-backend/issues/964)) ([c9ff323](https://github.com/instill-ai/pipeline-backend/commit/c9ff323851381de7bc4179cab129b4cb7241b434))
+* **document:** convert PDF to Markdown with Docling ([#959](https://github.com/instill-ai/pipeline-backend/issues/959)) ([a9dbf55](https://github.com/instill-ai/pipeline-backend/commit/a9dbf5576e68617ca40693f7839636c80a48487e))
+* **document:** log execution times for benchmarking ([#969](https://github.com/instill-ai/pipeline-backend/issues/969)) ([ac3e2c3](https://github.com/instill-ai/pipeline-backend/commit/ac3e2c3425a1c351ddda5ea0dd1e9d71ddf99ba0))
+* **init:** remove preset pipeline downloader ([#970](https://github.com/instill-ai/pipeline-backend/issues/970)) ([11f8f5c](https://github.com/instill-ai/pipeline-backend/commit/11f8f5cbab1b8993248b3f48b3651a1b46ca857a))
+* **minio:** add client info and user header to artifact binary fetcher ([#978](https://github.com/instill-ai/pipeline-backend/issues/978)) ([78c9c1f](https://github.com/instill-ai/pipeline-backend/commit/78c9c1f511faa4872d4c42161123ee6a6956669a))
+* **minio:** add service name and version to MinIO requests ([#976](https://github.com/instill-ai/pipeline-backend/issues/976)) ([39c66cd](https://github.com/instill-ai/pipeline-backend/commit/39c66cdaef2e3ce73bd1f35cb46ac90306657262))
+* **minio:** log MinIO actions with requester ([#972](https://github.com/instill-ai/pipeline-backend/issues/972)) ([8ba353e](https://github.com/instill-ai/pipeline-backend/commit/8ba353ef3e19a9071a06f6ecfa7f1e3fa4ef5931))
+* **perplexity:** add new Sonar models ([#957](https://github.com/instill-ai/pipeline-backend/issues/957)) ([2699679](https://github.com/instill-ai/pipeline-backend/commit/2699679c34cb5f2d7dd76b568bd778762423cc99))
+* **recipe:** rename `format` to `type` in variable section ([#971](https://github.com/instill-ai/pipeline-backend/issues/971)) ([88ead91](https://github.com/instill-ai/pipeline-backend/commit/88ead914d6477a9697e81537e77e3f58600ed80d))
+* **x:** update MinIO package to delegate audit logs ([#973](https://github.com/instill-ai/pipeline-backend/issues/973)) ([f81287b](https://github.com/instill-ai/pipeline-backend/commit/f81287bfe1ee4b8e240796f1aa49e1cf78f6866e))
+
+
+### Bug Fixes
+
+* **ci:** registry image build ([#960](https://github.com/instill-ai/pipeline-backend/issues/960)) ([3a56698](https://github.com/instill-ai/pipeline-backend/commit/3a56698fe5f4d4109cbc1d8e713727bd8500c640))
+
+## [0.50.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.49.1-beta...v0.50.0-beta) (2025-01-16)
+
+
+### Features
+
+* **component,github:** add more user and org tasks ([#880](https://github.com/instill-ai/pipeline-backend/issues/880)) ([d6466bf](https://github.com/instill-ai/pipeline-backend/commit/d6466bfae501f54b6cd6e6edb9410ce1e10c933f))
+* **component,openai:** add supports for tools and predicted output ([#953](https://github.com/instill-ai/pipeline-backend/issues/953)) ([fc808a7](https://github.com/instill-ai/pipeline-backend/commit/fc808a7cfb888c0f59c2f84a55a490601c7969ca))
+* **pipeline:** return the error from a component inside an iterator ([#955](https://github.com/instill-ai/pipeline-backend/issues/955)) ([bebe57f](https://github.com/instill-ai/pipeline-backend/commit/bebe57f58d7735e36e83c5181b0eacd4d550988a))
+
+## [0.49.1-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.49.0-beta...v0.49.1-beta) (2024-12-23)
+
+
+### Features
+
+* **component,video:** add task to embed audio to video ([#939](https://github.com/instill-ai/pipeline-backend/issues/939)) ([1aa40c2](https://github.com/instill-ai/pipeline-backend/commit/1aa40c274ccc9ea3ad1e7e6e6d10e48740ed9eda))
+
+
+### Bug Fixes
+
+* **component,github:** fix data structs ([#944](https://github.com/instill-ai/pipeline-backend/issues/944)) ([804e56a](https://github.com/instill-ai/pipeline-backend/commit/804e56a59204bc52d4e0e8f3075331340fbbed68))
+* **mod:** update golang.org/x/net module to fix vulnerability issue ([a2db7de](https://github.com/instill-ai/pipeline-backend/commit/a2db7dea69f47b7e0fa8fba5d70aecea405d88f7))
+
+
+### Miscellaneous Chores
+
+* release v0.49.1-beta ([51d676d](https://github.com/instill-ai/pipeline-backend/commit/51d676d1e1ab1a966d86baf4c1dcb62facdc916f))
+
+## [0.49.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.5-beta...v0.49.0-beta) (2024-12-17)
+
+
+### Features
+
+* **pipeline:** add blob expiration time to run logs ([#938](https://github.com/instill-ai/pipeline-backend/issues/938)) ([fa7ef0e](https://github.com/instill-ai/pipeline-backend/commit/fa7ef0ee11cb4539e51bad7d92556aa9ca3d6f5d))
+
+## [0.48.5-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.4-beta...v0.48.5-beta) (2024-12-11)
+
+
+### Features
+
+* **pinecone:** pinecone batch upsert ([#927](https://github.com/instill-ai/pipeline-backend/issues/927)) ([398adf9](https://github.com/instill-ai/pipeline-backend/commit/398adf90954ad4df27bf9228e97bdc106dd25464))
+* **vdp:** upload component input output data ([#923](https://github.com/instill-ai/pipeline-backend/issues/923)) ([8b6caab](https://github.com/instill-ai/pipeline-backend/commit/8b6caab5b9add954cc56e1a400839a0e29ff2446))
+
+
+### Bug Fixes
+
+* **trigger:** add component intermediate data in the trigger stream/response ([#932](https://github.com/instill-ai/pipeline-backend/issues/932)) ([2077ae7](https://github.com/instill-ai/pipeline-backend/commit/2077ae7167eb0d4e1f06dfe8f599104eee37a206))
+* **trigger:** resolve issue where default value for number cannot be an integer ([#933](https://github.com/instill-ai/pipeline-backend/issues/933)) ([134032a](https://github.com/instill-ai/pipeline-backend/commit/134032a26174e033b2b30983949b2e5858017eeb))
+
+
+### Miscellaneous Chores
+
+* release v0.48.5-beta ([043788d](https://github.com/instill-ai/pipeline-backend/commit/043788d091a758a97fc6be453c3211fe1cbfb26d))
+
+## [0.48.4-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.3-beta...v0.48.4-beta) (2024-12-09)
+
+
+### Features
+
+* **pinecone:** Add rerank task for Pinecone component ([#773](https://github.com/instill-ai/pipeline-backend/issues/773)) ([e1fd611](https://github.com/instill-ai/pipeline-backend/commit/e1fd611b55a11798e5d1b5b6f52152392fe6f00f))
+* **vdp:** upload raw inputs for run log ([#904](https://github.com/instill-ai/pipeline-backend/issues/904)) ([960f4c2](https://github.com/instill-ai/pipeline-backend/commit/960f4c2c131eff9dfcfb11cc1a90237f2179192c))
+
+
+### Bug Fixes
+
+* **component,http:** fix the request body marshalling ([#928](https://github.com/instill-ai/pipeline-backend/issues/928)) ([b47cc71](https://github.com/instill-ai/pipeline-backend/commit/b47cc71bff76b569ce7e19d934697ff7bdaf41a7))
+
+
+### Miscellaneous Chores
+
+* release v0.48.4-beta ([b08878e](https://github.com/instill-ai/pipeline-backend/commit/b08878ebf309ff18272538120dda06db2ef718f9))
+
+## [0.48.3-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.2-beta...v0.48.3-beta) (2024-12-04)
+
+
+### Bug Fixes
+
+* **repository:** fix edition filter ([#921](https://github.com/instill-ai/pipeline-backend/issues/921)) ([634cacd](https://github.com/instill-ai/pipeline-backend/commit/634cacdcff0f976ef4e2c79db906eed3cdcabda9))
+
+## [0.48.2-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.1-beta...v0.48.2-beta) (2024-12-04)
+
+
+### Features
+
+* **compogen:** replace * to any ([#917](https://github.com/instill-ai/pipeline-backend/issues/917)) ([87ca33a](https://github.com/instill-ai/pipeline-backend/commit/87ca33ab08de355040463af4ee1eb528eb6c5407))
+* **compogen:** replace array[*] to array[any] ([#919](https://github.com/instill-ai/pipeline-backend/issues/919)) ([9990f0e](https://github.com/instill-ai/pipeline-backend/commit/9990f0ecd708099501eb55207df959fb7d647497))
+
+
+### Miscellaneous Chores
+
+* release v0.48.2-beta ([4989887](https://github.com/instill-ai/pipeline-backend/commit/4989887a703513329a6495e338434cdf816b3ece))
+
+## [0.48.1-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.48.0-beta...v0.48.1-beta) (2024-12-03)
+
+
+### Features
+
+* **compogen:** add {{}} case for compogen ([#913](https://github.com/instill-ai/pipeline-backend/issues/913)) ([b976387](https://github.com/instill-ai/pipeline-backend/commit/b976387d62996f4140c8000a063b04259a8965ed))
+
+
+### Bug Fixes
+
+* **workflow:** fix wrong component id in SchedulePipelineWorkflow ([#916](https://github.com/instill-ai/pipeline-backend/issues/916)) ([934dc3d](https://github.com/instill-ai/pipeline-backend/commit/934dc3d9e299aabfea431a6d2f67536214f0814d))
+
+
+### Miscellaneous Chores
+
+* release v0.48.1-beta ([a448e4b](https://github.com/instill-ai/pipeline-backend/commit/a448e4bd96e7dd9bbff938fb8b42474a581090f0))
+
+## [0.48.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.47.2-beta...v0.48.0-beta) (2024-12-03)
+
+
+### Features
+
+* **component,data,base:** enhance component features ([#885](https://github.com/instill-ai/pipeline-backend/issues/885)) ([68b396f](https://github.com/instill-ai/pipeline-backend/commit/68b396fb014d5018e854eb1b1e2f0131670f6e1f))
+* **component,googlesheet:** implement the Google Sheet component ([#878](https://github.com/instill-ai/pipeline-backend/issues/878)) ([8a0ab93](https://github.com/instill-ai/pipeline-backend/commit/8a0ab93a5e3239c9bade1c7e9e0d106120852543))
+* **component,instillapp:** remove instill-app component ([#911](https://github.com/instill-ai/pipeline-backend/issues/911)) ([4a7c970](https://github.com/instill-ai/pipeline-backend/commit/4a7c970fa1a3183190d84d51faa98fafda49139f))
+* **component,openai:** support streaming for o1-mini and o1-preview models ([#882](https://github.com/instill-ai/pipeline-backend/issues/882)) ([367e957](https://github.com/instill-ai/pipeline-backend/commit/367e9577942992e754901163838c3b9d998f0e68))
+* **component,schedule:** introduce the `schedule` component ([#900](https://github.com/instill-ai/pipeline-backend/issues/900)) ([9582942](https://github.com/instill-ai/pipeline-backend/commit/9582942cd0ff0b131b3fb9c831242a1a351faa35))
+* **connection:** add lookup connection endpoint ([#888](https://github.com/instill-ai/pipeline-backend/issues/888)) ([86bffe8](https://github.com/instill-ai/pipeline-backend/commit/86bffe87de6e7d2c476eede73a4da45cbb722410))
+* **data:** add support for default value in `instill` Go tag ([#891](https://github.com/instill-ai/pipeline-backend/issues/891)) ([b9c2d05](https://github.com/instill-ai/pipeline-backend/commit/b9c2d057f6c15c8ca9b5948b1b21d49122a58409))
+* **leadiq:** implement leadiq component ([#874](https://github.com/instill-ai/pipeline-backend/issues/874)) ([78c2ec7](https://github.com/instill-ai/pipeline-backend/commit/78c2ec7020137ff25d8e1b4ac7ac4807896a1637))
+* **perplexity:** add perplexity component ([#861](https://github.com/instill-ai/pipeline-backend/issues/861)) ([1fc7dbe](https://github.com/instill-ai/pipeline-backend/commit/1fc7dbee9d46c2bba87127194c3fdc5ce2ee30c7))
+* **recipe:** separate the template and the rendered value for input and setup ([#886](https://github.com/instill-ai/pipeline-backend/issues/886)) ([3ec3dd6](https://github.com/instill-ai/pipeline-backend/commit/3ec3dd60a45c9f1358c29c09923fa221e91213b4))
+* **recipe:** support `required` attribute for variable ([#901](https://github.com/instill-ai/pipeline-backend/issues/901)) ([da7f0e9](https://github.com/instill-ai/pipeline-backend/commit/da7f0e97beb202312a6150394707184fbe902091))
+* **service:** add the file extension to the output filename ([#873](https://github.com/instill-ai/pipeline-backend/issues/873)) ([22b92b0](https://github.com/instill-ai/pipeline-backend/commit/22b92b03198bea0231e9780ef4f76b6552b88fc1))
+* **service:** trigger latest release version for pipeline with run-on-event setting ([#896](https://github.com/instill-ai/pipeline-backend/issues/896)) ([0b1c071](https://github.com/instill-ai/pipeline-backend/commit/0b1c0711ec5a130f8781caef89fc8cebc000134c))
+* **smartlead:** implement smartlead ([#879](https://github.com/instill-ai/pipeline-backend/issues/879)) ([f6baf2a](https://github.com/instill-ai/pipeline-backend/commit/f6baf2a898147a7504ce326dec015838ffd54b20))
+* **text:** improve markdown chunking ([#889](https://github.com/instill-ai/pipeline-backend/issues/889)) ([d48b3ec](https://github.com/instill-ai/pipeline-backend/commit/d48b3ec444ef5e83a46dd260d21181076cd5bdb2))
+* **trigger:** accept connection references in the pipeline trigger data ([#883](https://github.com/instill-ai/pipeline-backend/issues/883)) ([937bd01](https://github.com/instill-ai/pipeline-backend/commit/937bd01436091ec1cc303d07f84a2f257554a63c))
+* **trigger:** enable optional values for variables ([#884](https://github.com/instill-ai/pipeline-backend/issues/884)) ([187f5fd](https://github.com/instill-ai/pipeline-backend/commit/187f5fd60fba7b5d7b74bb7b6c63e04d77fb3742))
+* **vdp:** skip google drive for cloud version ([#899](https://github.com/instill-ai/pipeline-backend/issues/899)) ([5089397](https://github.com/instill-ai/pipeline-backend/commit/50893971ea8c6f1e1e18b8a886de9a4c890e1983))
+
+
+### Bug Fixes
+
+* **ci:** use xk6-sql driver and pin down versions ([#876](https://github.com/instill-ai/pipeline-backend/issues/876)) ([1f64d6c](https://github.com/instill-ai/pipeline-backend/commit/1f64d6c26a694a76831b53ccf69a2f0efae40915))
+* **component,openai:** enable the use of system messages with chat history ([#905](https://github.com/instill-ai/pipeline-backend/issues/905)) ([ef3e66f](https://github.com/instill-ai/pipeline-backend/commit/ef3e66fd4fd9360730d4da0cbfe65e0bc210c309))
+* **leadiq, smartlead:** change field to optional ([#892](https://github.com/instill-ai/pipeline-backend/issues/892)) ([9bd995d](https://github.com/instill-ai/pipeline-backend/commit/9bd995d001c019d2f54d87b977d2c702052b63ef))
+* **web:** fix url and markdown position ([#893](https://github.com/instill-ai/pipeline-backend/issues/893)) ([af8f412](https://github.com/instill-ai/pipeline-backend/commit/af8f41204f5cb6a66628677c633ec4fcef7fbd22))
+
+## [0.47.2-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.47.0-beta...v0.47.2-beta) (2024-11-21)
+
+
+### Bug Fixes
+
+* **github:** fix time format bug ([#866](https://github.com/instill-ai/pipeline-backend/issues/866)) ([94edc7c](https://github.com/instill-ai/pipeline-backend/commit/94edc7ca5971a0f51b7dca3fcdd08303bb6686a0))
+* **migration:** add array index check for migration 36 ([03bbf91](https://github.com/instill-ai/pipeline-backend/commit/03bbf91ef78d0357c164bd8469e2f24d9200a97a))
+
+
+### Miscellaneous Chores
+
+* release v0.47.2-beta ([a5f5c07](https://github.com/instill-ai/pipeline-backend/commit/a5f5c07e1b733be9f7b586d40b7b3d27a7b37791))
+
+## [0.47.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.46.0-beta...v0.47.0-beta) (2024-11-20)
+
+
+### Features
+
+* **component:** add support for event specifications ([#837](https://github.com/instill-ai/pipeline-backend/issues/837)) ([47a61cd](https://github.com/instill-ai/pipeline-backend/commit/47a61cd2173a7038a662d8cd9458b51de4f124e8))
+* **component:** implement run-on-event for Slack and GitHub component ([#842](https://github.com/instill-ai/pipeline-backend/issues/842)) ([1b6a569](https://github.com/instill-ai/pipeline-backend/commit/1b6a5696e4b33d79d0c92bb1aff8a357020cc44f))
+* convert pdf to image concurrently ([#818](https://github.com/instill-ai/pipeline-backend/issues/818)) ([4c0ad97](https://github.com/instill-ai/pipeline-backend/commit/4c0ad97673a6e2935cd8bc9608b57d2ad72b89b3))
+* improve markdown chunking ([#822](https://github.com/instill-ai/pipeline-backend/issues/822)) ([af1a36a](https://github.com/instill-ai/pipeline-backend/commit/af1a36a60d1ae36b02d5cd422b357feccaaf233a))
+* **json:** Support Rename Fields for JSON operator ([#813](https://github.com/instill-ai/pipeline-backend/issues/813)) ([093714e](https://github.com/instill-ai/pipeline-backend/commit/093714e34ac0846be8e10e0be61534a339e632c5))
+* **recipe:** refactor run-on-event recipe structure ([#835](https://github.com/instill-ai/pipeline-backend/issues/835)) ([78ea418](https://github.com/instill-ai/pipeline-backend/commit/78ea4183cf236b7533ca4b890cbfcae836df3158))
+* **recipe:** rename `instill-format` to `format` ([#798](https://github.com/instill-ai/pipeline-backend/issues/798)) ([80a9fc9](https://github.com/instill-ai/pipeline-backend/commit/80a9fc90a472b48c6ad97c45887da7e3be7709e0))
+* **service:** implement PipelineErrorUpdated streaming event for pipeline errors ([#846](https://github.com/instill-ai/pipeline-backend/issues/846)) ([3156a5f](https://github.com/instill-ai/pipeline-backend/commit/3156a5fc406914035a482d3aa061205caec271e3))
+* **vdp:** integrate blob storage to vdp ([#834](https://github.com/instill-ai/pipeline-backend/issues/834)) ([5311549](https://github.com/instill-ai/pipeline-backend/commit/53115493edbebfe2be8bee5218808faea7bded36))
+* **web:** add input schema to improve web operator ([#819](https://github.com/instill-ai/pipeline-backend/issues/819)) ([f7e1fe9](https://github.com/instill-ai/pipeline-backend/commit/f7e1fe9dabc0affce606ee824f373e11774843c5))
+
+
+### Bug Fixes
+
+* **data:** refactor numberData to support both float and integer types ([#832](https://github.com/instill-ai/pipeline-backend/issues/832)) ([cf27452](https://github.com/instill-ai/pipeline-backend/commit/cf27452e529779fab314e843540afd732e6382d0))
+* **document:** fix bug about convert to image ([#848](https://github.com/instill-ai/pipeline-backend/issues/848)) ([a381c27](https://github.com/instill-ai/pipeline-backend/commit/a381c2771dbed32bc52e7eb532a7aa5cfcc646e5))
+* fix bug about unit type ([#826](https://github.com/instill-ai/pipeline-backend/issues/826)) ([a89fdf7](https://github.com/instill-ai/pipeline-backend/commit/a89fdf7db08a76a579a561abe2c88a892e2f8bde))
+* **integration-test:** maximize build space on image build & push ([#823](https://github.com/instill-ai/pipeline-backend/issues/823)) ([a439d22](https://github.com/instill-ai/pipeline-backend/commit/a439d22849911ecde600057e4e8fc487b12354bd))
+* **run:** set pipeline run status as failed when component fails ([#836](https://github.com/instill-ai/pipeline-backend/issues/836)) ([70a5c52](https://github.com/instill-ai/pipeline-backend/commit/70a5c526630393b163575987914d132d28704dca))
+* **service:** add MIME type detection in the backend binaryFetcher ([#854](https://github.com/instill-ai/pipeline-backend/issues/854)) ([f434b2b](https://github.com/instill-ai/pipeline-backend/commit/f434b2bc46ae2472a50960e7232c66d0dac40957))
+* **service:** add missing nil check in includeIteratorComponentDetail() ([#831](https://github.com/instill-ai/pipeline-backend/issues/831)) ([9cb5e9e](https://github.com/instill-ai/pipeline-backend/commit/9cb5e9e45f9070c84055c20966f50a5025db0e52))
+* **service:** skip empty component definition in API response ([#847](https://github.com/instill-ai/pipeline-backend/issues/847)) ([d61b55e](https://github.com/instill-ai/pipeline-backend/commit/d61b55eaae8e16d50dfe347de2b608034e0860b2))
+* unit tests ([#820](https://github.com/instill-ai/pipeline-backend/issues/820)) ([717200c](https://github.com/instill-ai/pipeline-backend/commit/717200cc96518435f1e89b506090c94785fa54ed))
+* **vdp:** item does not contain the instill format, so we insert it ([#858](https://github.com/instill-ai/pipeline-backend/issues/858)) ([2d25401](https://github.com/instill-ai/pipeline-backend/commit/2d25401204bfdc2cb7ae052e0f722a5c92ea3ab9))
+* **workflow:** allow integration usage within iterator ([#833](https://github.com/instill-ai/pipeline-backend/issues/833)) ([c9bd169](https://github.com/instill-ai/pipeline-backend/commit/c9bd169e05479f2b69f7694ee95e7c8209862a41))
+
+## [0.46.0-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.45.2-beta...v0.46.0-beta) (2024-11-05)
+
+
+### Features
+
+* add `condition` field support for iterator ([#803](https://github.com/instill-ai/pipeline-backend/issues/803)) ([04b1252](https://github.com/instill-ai/pipeline-backend/commit/04b12529eb5a1fe5c4bc13fe89828fbdc403bc54))
+* add markdowns per pages ([#792](https://github.com/instill-ai/pipeline-backend/issues/792)) ([3ee428e](https://github.com/instill-ai/pipeline-backend/commit/3ee428ef7be4a4c0f2e2e22bfe8b795b89333a0c))
+* add resolution field ([#808](https://github.com/instill-ai/pipeline-backend/issues/808)) ([f15f6bf](https://github.com/instill-ai/pipeline-backend/commit/f15f6bf5de177f23b529a2b87c1809b9c10f4265))
+* add task sync ([#793](https://github.com/instill-ai/pipeline-backend/issues/793)) ([41a1eeb](https://github.com/instill-ai/pipeline-backend/commit/41a1eeb47e7eadcf17c6db7141418aef41affb19))
+* **component,audio:** add TASK_DETECT_ACTIVITY and TASK_SEGMENT ([#762](https://github.com/instill-ai/pipeline-backend/issues/762)) ([9e92a31](https://github.com/instill-ai/pipeline-backend/commit/9e92a311e76a4e9d937f372fa3f203d9b84ee22e))
+* **component,http:** refactor `restapi` component to `http` component ([#797](https://github.com/instill-ai/pipeline-backend/issues/797)) ([c2b1862](https://github.com/instill-ai/pipeline-backend/commit/c2b18620a38e5f69cfc4b30e61f371a8824d9cd1))
+* **component:** add error handling for missing conversation ([#806](https://github.com/instill-ai/pipeline-backend/issues/806)) ([54cc616](https://github.com/instill-ai/pipeline-backend/commit/54cc616726c2b6dd5c6ddaf3b677443de73e71c0))
+* **component:** inject global secrets as environment variables ([#786](https://github.com/instill-ai/pipeline-backend/issues/786)) ([8d842a6](https://github.com/instill-ai/pipeline-backend/commit/8d842a668c96e4557db9a63421d94f4c352be17b))
+* convert time type to string ([#809](https://github.com/instill-ai/pipeline-backend/issues/809)) ([7de8465](https://github.com/instill-ai/pipeline-backend/commit/7de84651b4019e69806c1b0ea461084a37d6fbd5))
+* **googledrive:** add the tasks for google drive ([#725](https://github.com/instill-ai/pipeline-backend/issues/725)) ([b6fe968](https://github.com/instill-ai/pipeline-backend/commit/b6fe9686c688f9c3b7de5942510e2818d893ade6))
+* **integration:** identify supported OAuth integrations through global secrets ([#791](https://github.com/instill-ai/pipeline-backend/issues/791)) ([5a96453](https://github.com/instill-ai/pipeline-backend/commit/5a964532e6cbc35eb6778626f8a5161c29dffc15))
+* **minio:** import updated minio package and add tag on file upload ([#779](https://github.com/instill-ai/pipeline-backend/issues/779)) ([ef86318](https://github.com/instill-ai/pipeline-backend/commit/ef863189a3c1617e7a47e89ba1632863f7e122ec))
+* revamp Instill Format ([#774](https://github.com/instill-ai/pipeline-backend/issues/774)) ([24153e2](https://github.com/instill-ai/pipeline-backend/commit/24153e2c57ba4ce508059a0bd1af8528b07b5ed3))
+* support `length` attribute for array data ([#810](https://github.com/instill-ai/pipeline-backend/issues/810)) ([fb4f4f7](https://github.com/instill-ai/pipeline-backend/commit/fb4f4f73064327be025999a4f9fbf31b8ac2e230))
+* **web:** refactor the web operator ([#772](https://github.com/instill-ai/pipeline-backend/issues/772)) ([ae4e3c2](https://github.com/instill-ai/pipeline-backend/commit/ae4e3c2d21951d666bbf0b0ae4c384d18446e41f))
+
+
+### Bug Fixes
+
+* **component,image:** fix missing show score draw ([#801](https://github.com/instill-ai/pipeline-backend/issues/801)) ([a405bf7](https://github.com/instill-ai/pipeline-backend/commit/a405bf70070222108a8500ae946dbf653c1ca1a0))
+* fix bug not to return error if there is no app or conversation ([#816](https://github.com/instill-ai/pipeline-backend/issues/816)) ([a946cfd](https://github.com/instill-ai/pipeline-backend/commit/a946cfd22ede65f608d79efcbb2d52e14fadc692))
+* fix iterator upstream check ([#794](https://github.com/instill-ai/pipeline-backend/issues/794)) ([671971f](https://github.com/instill-ai/pipeline-backend/commit/671971f5e1ed69f87f76ec75b2a0d96db3637e62))
+* **run:** add metadata retention handler ([#800](https://github.com/instill-ai/pipeline-backend/issues/800)) ([25ec0c2](https://github.com/instill-ai/pipeline-backend/commit/25ec0c227521cebbe79e873be9e859649341079d))
+* **run:** add namespace id in response ([#811](https://github.com/instill-ai/pipeline-backend/issues/811)) ([8d29ffb](https://github.com/instill-ai/pipeline-backend/commit/8d29ffbc813545833f9694b78bef07a31b428a22))
+* **run:** rename pipeline run columns and fix tests ([#776](https://github.com/instill-ai/pipeline-backend/issues/776)) ([98f1e00](https://github.com/instill-ai/pipeline-backend/commit/98f1e001f683c8b5ae72b553e3217f0459ac3ef8))
+* **slack:** correct link to OAuth config in documentation ([#805](https://github.com/instill-ai/pipeline-backend/issues/805)) ([aa0752d](https://github.com/instill-ai/pipeline-backend/commit/aa0752dca35ff49960c35d6082e295d3a11b16d6))
+
 ## [0.45.2-beta](https://github.com/instill-ai/pipeline-backend/compare/v0.45.1-beta...v0.45.2-beta) (2024-10-29)
 
 
@@ -572,7 +1138,7 @@
 * add component definition list endpoint ([#396](https://github.com/instill-ai/pipeline-backend/issues/396)) ([b8728c1](https://github.com/instill-ai/pipeline-backend/commit/b8728c16483fb68cdaed65dff191d2500ec06e4e))
 * rename blockchain connector type to application ([#397](https://github.com/instill-ai/pipeline-backend/issues/397)) ([80aa6a5](https://github.com/instill-ai/pipeline-backend/commit/80aa6a5c725fa18c34a84db4ec426f60461fd702))
 * support reference with `foo["bar"]` syntax ([#394](https://github.com/instill-ai/pipeline-backend/issues/394)) ([ed82215](https://github.com/instill-ai/pipeline-backend/commit/ed8221504572ba67e39367b651085df438306c7d))
-* use `mgmtPB.Owner` to embed the owner information in response ([#392](https://github.com/instill-ai/pipeline-backend/issues/392)) ([d071461](https://github.com/instill-ai/pipeline-backend/commit/d0714617e34aa7779947b153297a7bffea7bd08f))
+* use `mgmtpb.Owner` to embed the owner information in response ([#392](https://github.com/instill-ai/pipeline-backend/issues/392)) ([d071461](https://github.com/instill-ai/pipeline-backend/commit/d0714617e34aa7779947b153297a7bffea7bd08f))
 
 
 ### Bug Fixes

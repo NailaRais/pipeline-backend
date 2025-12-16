@@ -10,7 +10,7 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 
-	artifactPB "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
 )
 
 func (e *execution) getChunksMetadata(input *structpb.Struct) (*structpb.Struct, error) {
@@ -21,18 +21,16 @@ func (e *execution) getChunksMetadata(input *structpb.Struct) (*structpb.Struct,
 		return nil, fmt.Errorf("failed to convert input to struct: %w", err)
 	}
 
-	artifactClient, connection := e.client, e.connection
-
-	defer connection.Close()
+	artifactClient := e.client
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	ctx = metadata.NewOutgoingContext(ctx, getRequestMetadata(e.SystemVariables))
 
-	chunksRes, err := artifactClient.ListChunks(ctx, &artifactPB.ListChunksRequest{
-		NamespaceId: inputStruct.Namespace,
-		CatalogId:   inputStruct.CatalogID,
-		FileUid:     inputStruct.FileUID,
+	chunksRes, err := artifactClient.ListChunks(ctx, &artifactpb.ListChunksRequest{
+		NamespaceId:     inputStruct.Namespace,
+		KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+		FileId:          inputStruct.FileUID,
 	})
 
 	if err != nil {
@@ -45,13 +43,13 @@ func (e *execution) getChunksMetadata(input *structpb.Struct) (*structpb.Struct,
 
 	for _, chunkPB := range chunksRes.Chunks {
 		output.Chunks = append(output.Chunks, ChunkOutput{
-			ChunkUID:        chunkPB.ChunkUid,
+			ChunkUID:        chunkPB.Uid,
 			Retrievable:     chunkPB.Retrievable,
-			StartPosition:   chunkPB.StartPos,
-			EndPosition:     chunkPB.EndPos,
+			StartPosition:   0, // deprecated field
+			EndPosition:     0, // deprecated field
 			TokenCount:      chunkPB.Tokens,
 			CreateTime:      chunkPB.CreateTime.AsTime().Format(time.RFC3339),
-			OriginalFileUID: chunkPB.OriginalFileUid,
+			OriginalFileUID: chunkPB.OriginalFileId,
 		})
 	}
 

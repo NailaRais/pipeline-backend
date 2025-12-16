@@ -1,6 +1,12 @@
 name: Coverage
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   codecov:
@@ -9,52 +15,114 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    services:
-      postgres:
-        image: postgres
-        env:
-          POSTGRES_PASSWORD: password
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
     steps:
+      # Tests can fail due to insufficient disk space, so we optimize the disk
+      # usage.
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+          build-mount-path: "/var/lib/docker"
 
-      - uses: actions/checkout@v3
+      - name: Restart docker
+        run: sudo service docker restart
+
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Start PostgreSQL as a container after disk optimization
+      - name: Start PostgreSQL
+        run: |
+          docker run -d \
+            --name postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=password \
+            -e POSTGRES_DB=pipeline_test \
+            -p 5432:5432 \
+            --health-cmd="pg_isready -U postgres" \
+            --health-interval=10s \
+            --health-timeout=5s \
+            --health-retries=5 \
+            postgres:15
+
+          # Wait for PostgreSQL to be healthy
+          echo "Waiting for PostgreSQL to be ready..."
+          while [ "$(docker inspect --format='{{.State.Health.Status}}' postgres)" != "healthy" ]; do
+            echo "Waiting for PostgreSQL health check..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
 
       - name: Load .env file
         uses: cardinalby/export-env-action@v2
         with:
           envFile: .env
 
-      - uses: actions/setup-go@v3
+      # Go is used for the test database migration
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GOLANG_VERSION }}
+          cache: false
 
-      - uses: actions/checkout@v3
+      # Set up Docker Buildx for advanced caching features
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
 
-      - name: Install onnxruntime library and headers
+      # Check if cached image exists and is recent
+      - name: Check for cached image
+        id: cache_check
         run: |
-          export ONNXRUNTIME_ROOT_PATH=$GITHUB_WORKSPACE/onnxruntime
-          LATEST_VERSION=$(wget -qO- https://api.github.com/repos/microsoft/onnxruntime/releases/latest | jq -r .tag_name)
-          ONNX_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x64")
-          wget https://github.com/microsoft/onnxruntime/releases/download/${LATEST_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${LATEST_VERSION#v}.tgz
-          tar -xzf onnxruntime-linux-${ONNX_ARCH}-${LATEST_VERSION#v}.tgz
-          mv onnxruntime-linux-${ONNX_ARCH}-${LATEST_VERSION#v} ${ONNXRUNTIME_ROOT_PATH}
-          rm onnxruntime-linux-${ONNX_ARCH}-${LATEST_VERSION#v}.tgz
-          echo "LD_RUN_PATH=${ONNXRUNTIME_ROOT_PATH}/lib" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=${ONNXRUNTIME_ROOT_PATH}/lib" >> $GITHUB_ENV
-          echo "C_INCLUDE_PATH=${ONNXRUNTIME_ROOT_PATH}/include" >> $GITHUB_ENV
+          # Get the hash of files that would affect the Docker build
+          BUILD_CONTEXT_HASH=$(find . -name "Dockerfile.dev" -o -name "go.mod" -o -name "go.sum" -o -path "./pkg/component/resources/onnx/*" | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
+          echo "build_context_hash=${BUILD_CONTEXT_HASH}" >> $GITHUB_OUTPUT
+
+          # Check GitHub Container Registry for cached image first
+          echo "cache_hit=false" >> $GITHUB_OUTPUT
+          echo "Checking for cached image with hash: ${BUILD_CONTEXT_HASH}"
+
+      # Build dev image with comprehensive caching strategy (only if cache miss)
+      - name: Build dev image with cache
+        if: steps.cache_check.outputs.cache_hit != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dev
+          load: true
+          build-args: |
+            SERVICE_NAME=${{ env.SERVICE_NAME }}
+            K6_VERSION=${{ env.K6_VERSION }}
+            XK6_VERSION=${{ env.XK6_VERSION }}
+            XK6_SQL_VERSION=${{ env.XK6_SQL_VERSION }}
+            XK6_SQL_POSTGRES_VERSION=${{ env.XK6_SQL_POSTGRES_VERSION }}
+          tags: |
+            instill/${{ env.SERVICE_NAME }}:dev
+            instill/${{ env.SERVICE_NAME }}:cache-${{ steps.cache_check.outputs.build_context_hash }}
+          cache-from: |
+            type=gha,scope=${{ github.ref_name }}-dev
+            type=gha,scope=main-dev
+            type=gha,scope=base-deps
+            type=gha,scope=binary-deps
+            type=gha,scope=go-deps
+            type=gha,scope=model-artifacts
+          cache-to: |
+            type=gha,mode=max,scope=${{ github.ref_name }}-dev
+            type=gha,mode=max,scope=base-deps
+            type=gha,mode=max,scope=binary-deps
+            type=gha,mode=max,scope=go-deps
+            type=gha,mode=max,scope=model-artifacts
 
       - name: Generate coverage report
         run: |
-          make build-dev
-          make coverage DBTEST=true OCR=true ONNX=true
+          make coverage DBTEST=true OCR=true ONNX=true DOCKER_NETWORK=host TEST_DBHOST=localhost TEST_DBNAME=pipeline_test
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v2
@@ -62,3 +130,10 @@ jobs:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
+
+      # Cleanup PostgreSQL container
+      - name: Cleanup PostgreSQL
+        if: always()
+        run: |
+          docker stop postgres || true
+          docker rm postgres || true

@@ -4,13 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
-	"strconv"
 	"strings"
-
-	"go/ast"
-	"go/token"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -19,10 +14,10 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/data/format"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
 	"github.com/instill-ai/pipeline-backend/pkg/memory"
-	"github.com/instill-ai/x/errmsg"
 
 	componentbase "github.com/instill-ai/pipeline-backend/pkg/component/base"
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 type unionFind struct {
@@ -160,15 +155,7 @@ func (d *dag) TopologicalSort() ([]datamodel.ComponentMap, error) {
 	return ans, nil
 }
 
-func resolveReference(ctx context.Context, wfm memory.WorkflowMemory, batchIdx int, path string) (format.Value, error) {
-	v, err := wfm.Get(ctx, batchIdx, path)
-	if err != nil {
-		return nil, err
-	}
-	return v, err
-}
-
-func Render(ctx context.Context, template format.Value, batchIdx int, wfm memory.WorkflowMemory, allowUnresolved bool) (format.Value, error) {
+func Render(ctx context.Context, template format.Value, batchIdx int, wfm *memory.WorkflowMemory, allowUnresolved bool) (format.Value, error) {
 	if input, ok := template.(format.ReferenceString); ok {
 		s := input.String()
 		if strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}") && strings.Count(s, "${") == 1 {
@@ -178,12 +165,12 @@ func Render(ctx context.Context, template format.Value, batchIdx int, wfm memory
 			if s == constant.SegSecret+"."+constant.GlobalSecretKey {
 				return data.NewString(componentbase.SecretKeyword), nil
 			}
-			val, err := resolveReference(ctx, wfm, batchIdx, s)
+			val, err := wfm.Get(ctx, batchIdx, s)
 			if err != nil {
 				if allowUnresolved {
 					return data.NewNull(), nil
 				}
-				return nil, errmsg.AddMessage(
+				return nil, errorsx.AddMessage(
 					fmt.Errorf("resolving reference: %w", err),
 					"Couldn't resolve reference "+s+".",
 				)
@@ -207,17 +194,14 @@ func Render(ctx context.Context, template format.Value, batchIdx int, wfm memory
 			}
 
 			ref := strings.TrimSpace(s[2:endIdx])
-			v, err := resolveReference(ctx, wfm, batchIdx, ref)
+			v, err := wfm.Get(ctx, batchIdx, ref)
 			if err != nil {
 				if allowUnresolved {
 					return data.NewNull(), nil
 				}
 				return nil, err
 			}
-
-			if s, ok := v.(format.String); ok {
-				val += s.String()
-			}
+			val += v.String()
 			s = s[endIdx+1:]
 		}
 		return data.NewString(val), nil
@@ -247,285 +231,6 @@ func Render(ctx context.Context, template format.Value, batchIdx int, wfm memory
 	} else {
 		return template, nil
 	}
-}
-
-func EvalCondition(expr ast.Expr, value map[string]any) (any, error) {
-	switch e := (expr).(type) {
-	case *ast.UnaryExpr:
-		xRes, err := EvalCondition(e.X, value)
-		if err != nil {
-			return nil, err
-		}
-
-		switch e.Op {
-		case token.NOT: // !
-			switch xVal := xRes.(type) {
-			case bool:
-				return !xVal, nil
-			}
-		case token.SUB: // -
-			switch xVal := xRes.(type) {
-			case int64:
-				return -xVal, nil
-			case float64:
-				return -xVal, nil
-			}
-		}
-	case *ast.BinaryExpr:
-
-		xRes, err := EvalCondition(e.X, value)
-		if err != nil {
-			return nil, err
-		}
-		yRes, err := EvalCondition(e.Y, value)
-		if err != nil {
-			return nil, err
-		}
-
-		switch e.Op {
-		case token.LAND: // &&
-
-			xBool := false
-			yBool := false
-			switch xVal := xRes.(type) {
-			case int64, float64:
-				xBool = (xVal != 0)
-			case string:
-				xBool = (xVal != "")
-			case bool:
-				xBool = xVal
-			}
-			switch yVal := yRes.(type) {
-			case int64, float64:
-				yBool = (yVal != 0)
-			case string:
-				yBool = (yVal != "")
-			case bool:
-				yBool = yVal
-			}
-			return xBool && yBool, nil
-		case token.LOR: // ||
-
-			xBool := false
-			yBool := false
-			switch xVal := xRes.(type) {
-			case int64, float64:
-				xBool = (xVal != 0)
-			case string:
-				xBool = (xVal != "")
-			case bool:
-				xBool = xVal
-			}
-			switch yVal := yRes.(type) {
-			case int64, float64:
-				yBool = (yVal != 0)
-			case string:
-				yBool = (yVal != "")
-			case bool:
-				yBool = yVal
-			}
-			return xBool || yBool, nil
-
-		case token.EQL: // ==
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal == yVal, nil
-				case float64:
-					return float64(xVal) == yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal == float64(yVal), nil
-				case float64:
-					return xVal == yVal, nil
-				}
-			}
-			return reflect.DeepEqual(xRes, yRes), nil
-		case token.NEQ: // !=
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal != yVal, nil
-				case float64:
-					return float64(xVal) != yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal != float64(yVal), nil
-				case float64:
-					return xVal != yVal, nil
-				}
-			}
-			return !reflect.DeepEqual(xRes, yRes), nil
-
-		case token.LSS: // <
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal < yVal, nil
-				case float64:
-					return float64(xVal) < yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal < float64(yVal), nil
-				case float64:
-					return xVal < yVal, nil
-				}
-			}
-		case token.GTR: // >
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal > yVal, nil
-				case float64:
-					return float64(xVal) > yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal > float64(yVal), nil
-				case float64:
-					return xVal > yVal, nil
-				}
-			}
-
-		case token.LEQ: // <=
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal <= yVal, nil
-				case float64:
-					return float64(xVal) <= yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal <= float64(yVal), nil
-				case float64:
-					return xVal <= yVal, nil
-				}
-			}
-		case token.GEQ: // >=
-			switch xVal := xRes.(type) {
-			case int64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal >= yVal, nil
-				case float64:
-					return float64(xVal) >= yVal, nil
-				}
-			case float64:
-				switch yVal := yRes.(type) {
-				case int64:
-					return xVal >= float64(yVal), nil
-				case float64:
-					return xVal >= yVal, nil
-				}
-			}
-		}
-
-	case *ast.ParenExpr:
-		return EvalCondition(e.X, value)
-	case *ast.SelectorExpr:
-		v, err := EvalCondition(e.X, value)
-		if err != nil {
-			return nil, err
-		}
-		// Convert InputsMemory and ComponentItemMemory into map[string]any.
-		// Ignore error handling here since all of them are JSON data.
-		b, _ := json.Marshal(v)
-		m := map[string]any{}
-		_ = json.Unmarshal(b, &m)
-		return m[e.Sel.String()], nil
-	case *ast.BasicLit:
-		if e.Kind == token.INT {
-			return strconv.ParseInt(e.Value, 10, 64)
-		}
-		if e.Kind == token.FLOAT {
-			return strconv.ParseFloat(e.Value, 64)
-		}
-		if e.Kind == token.STRING {
-			return e.Value[1 : len(e.Value)-1], nil
-		}
-		return e.Value, nil
-	case *ast.Ident:
-		if e.Name == "true" {
-			return true, nil
-		}
-		if e.Name == "false" {
-			return false, nil
-		}
-
-		return value[e.Name], nil
-
-	case *ast.IndexExpr:
-		v, err := EvalCondition(e.X, value)
-		if err != nil {
-			return nil, err
-		}
-		switch idxVal := e.Index.(type) {
-		case *ast.BasicLit:
-			// handle arr[index]
-			if idxVal.Kind == token.INT {
-				index, err := strconv.Atoi(idxVal.Value)
-				if err != nil {
-					return nil, err
-				}
-				return v.([]any)[index], nil
-			}
-			// handle obj[key]
-			if idxVal.Kind == token.STRING {
-				// key: remove ""
-				key := idxVal.Value[1 : len(idxVal.Value)-1]
-				return v.(map[string]any)[key], nil
-			}
-		}
-
-	}
-	return false, fmt.Errorf("condition error")
-}
-
-func SanitizeCondition(cond string) (string, map[string]string, map[string]string) {
-	varMapping := map[string]string{}
-	revVarMapping := map[string]string{}
-	varNameIdx := 0
-	for {
-		leftIdx := strings.Index(cond, "${")
-		if leftIdx == -1 {
-			break
-		}
-		rightIdx := strings.Index(cond, "}")
-
-		left := cond[:leftIdx]
-		v := cond[leftIdx+2 : rightIdx]
-		right := cond[rightIdx+1:]
-
-		srcName := strings.Split(strings.TrimSpace(v), ".")[0]
-		if varName, ok := revVarMapping[srcName]; ok {
-			varMapping[varName] = srcName
-			revVarMapping[srcName] = varName
-			cond = left + strings.ReplaceAll(v, srcName, varName) + right
-		} else {
-			varName := fmt.Sprintf("var%d", varNameIdx)
-			varMapping[varName] = srcName
-			revVarMapping[srcName] = varName
-			varNameIdx++
-			cond = left + strings.ReplaceAll(v, srcName, varName) + right
-		}
-
-	}
-
-	return cond, varMapping, revVarMapping
 }
 
 func GenerateDAG(componentMap datamodel.ComponentMap) (*dag, error) {
@@ -631,21 +336,17 @@ func FindReferenceParent(input string) []string {
 	return upstreams
 }
 
-func GenerateTraces(ctx context.Context, wfm memory.WorkflowMemory, full bool) (map[string]*pb.Trace, error) {
-
-	trace := map[string]*pb.Trace{}
+func GenerateTraces(ctx context.Context, compIDs []string, wfm *memory.WorkflowMemory, full bool) (map[string]*pipelinepb.Trace, error) {
+	trace := map[string]*pipelinepb.Trace{}
 
 	batchSize := wfm.GetBatchSize()
-
-	for compID := range wfm.GetRecipe().Component {
-
+	for _, compID := range compIDs {
 		inputs := make([]*structpb.Struct, batchSize)
 		outputs := make([]*structpb.Struct, batchSize)
 		errors := make([]*structpb.Struct, batchSize)
-		traceStatuses := make([]pb.Trace_Status, batchSize)
+		traceStatuses := make([]pipelinepb.Trace_Status, batchSize)
 
 		for dataIdx := range batchSize {
-
 			completed, err := wfm.GetComponentStatus(ctx, dataIdx, compID, memory.ComponentStatusCompleted)
 			if err != nil {
 				continue
@@ -655,11 +356,11 @@ func GenerateTraces(ctx context.Context, wfm memory.WorkflowMemory, full bool) (
 				continue
 			}
 			if completed {
-				traceStatuses[dataIdx] = pb.Trace_STATUS_COMPLETED
+				traceStatuses[dataIdx] = pipelinepb.Trace_STATUS_COMPLETED
 			} else if skipped {
-				traceStatuses[dataIdx] = pb.Trace_STATUS_SKIPPED
+				traceStatuses[dataIdx] = pipelinepb.Trace_STATUS_SKIPPED
 			} else {
-				traceStatuses[dataIdx] = pb.Trace_STATUS_ERROR
+				traceStatuses[dataIdx] = pipelinepb.Trace_STATUS_ERROR
 			}
 
 			if compErr, err := wfm.GetComponentData(ctx, dataIdx, compID, memory.ComponentDataError); err == nil {
@@ -670,6 +371,7 @@ func GenerateTraces(ctx context.Context, wfm memory.WorkflowMemory, full bool) (
 				errors[dataIdx] = structVal.GetStructValue()
 			}
 
+			// TODO: For binary data fields, we should return a URL to access the blob instead of the raw data
 			if full {
 				if input, err := wfm.GetComponentData(ctx, dataIdx, compID, memory.ComponentDataInput); err == nil {
 					structVal, err := input.ToStructValue()
@@ -689,7 +391,7 @@ func GenerateTraces(ctx context.Context, wfm memory.WorkflowMemory, full bool) (
 			}
 		}
 
-		trace[compID] = &pb.Trace{
+		trace[compID] = &pipelinepb.Trace{
 			Statuses: traceStatuses,
 			Inputs:   inputs,
 			Outputs:  outputs,

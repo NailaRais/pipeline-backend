@@ -1,0 +1,82 @@
+$defs:
+  result:
+    properties:
+      link:
+        description: The full URL to which the search result is pointing, e.g., http://www.example.com/foo/bar.
+        type: string
+        uiOrder: 1
+        title: Link
+      link-html:
+        description: The scraped raw html of the link associated with this search result.
+        type: string
+        uiOrder: 4
+        title: Link HTML
+      link-text:
+        description: The scraped text of the link associated with this search result, in plain text.
+        type: string
+        uiOrder: 3
+        title: Link Text
+      snippet:
+        description: The snippet from the page associated with this search result, in plain text.
+        type: string
+        uiOrder: 2
+        title: Snippet
+      title:
+        description: The title of a search result, in plain text.
+        type: string
+        uiOrder: 0
+        title: Title
+    required:
+      - title
+      - link
+      - snippet
+    title: Result
+    type: object
+TASK_SEARCH:
+  shortDescription: Search data via Google Search Engine.
+  input:
+    uiOrder: 0
+    properties:
+      include-link-html:
+        default: false
+        description: Indicate whether to scrape the link and include the raw HTML of the link associated with this search result in the 'link-html' field.
+        type: boolean
+        uiOrder: 3
+        title: Include Link HTML
+      include-link-text:
+        default: false
+        description: Indicate whether to scrape the link and include the text of the link associated with this search result in the 'link-text' field.
+        type: boolean
+        uiOrder: 2
+        title: Include Link Text
+      query:
+        description: The search query for Google.
+        type: string
+        uiOrder: 0
+        title: Query
+      top-k:
+        default: 10
+        description: The number of results to return for each query.
+        type: integer
+        uiOrder: 1
+        maximum: 100
+        minimum: 1
+        title: Top K
+    required:
+      - query
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      results:
+        description: The returned search results from Google.
+        uiOrder: 0
+        items:
+          $ref: '#/$defs/result'
+        title: Results
+        type: array
+    required:
+      - results
+    title: Output
+    type: object

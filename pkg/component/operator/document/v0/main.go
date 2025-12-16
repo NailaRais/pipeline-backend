@@ -8,6 +8,9 @@ import (
 
 	_ "embed"
 
+	"github.com/gofrs/uuid"
+	"go.uber.org/zap"
+
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/operator/document/v0/transformer"
 )
@@ -16,14 +19,14 @@ const (
 	taskConvertToMarkdown string = "TASK_CONVERT_TO_MARKDOWN"
 	taskConvertToText     string = "TASK_CONVERT_TO_TEXT"
 	taskConvertToImages   string = "TASK_CONVERT_TO_IMAGES"
-	pythonInterpreter     string = "/opt/venv/bin/python"
+	taskSplitInPages      string = "TASK_SPLIT_IN_PAGES"
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -35,14 +38,14 @@ type component struct {
 
 type execution struct {
 	base.ComponentExecution
-	execute                func(ctx context.Context, job *base.Job) error
-	getMarkdownTransformer transformer.MarkdownTransformerGetterFunc
+	logger  *zap.Logger
+	execute func(ctx context.Context, job *base.Job) error
 }
 
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, nil, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, nil, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -86,9 +89,13 @@ func (e *execution) convertToText(ctx context.Context, job *base.Job) error {
 // CreateExecution initializes a component executor that can be used in a
 // pipeline trigger.
 func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution, error) {
+	executionID, _ := uuid.NewV4()
 	e := &execution{
-		ComponentExecution:     x,
-		getMarkdownTransformer: transformer.GetMarkdownTransformer,
+		ComponentExecution: x,
+		logger: x.GetLogger().With(
+			zap.Any("pipelineTriggerID", x.GetSystemVariables()["__PIPELINE_TRIGGER_ID"]),
+			zap.String("executionID", executionID.String()),
+		),
 	}
 
 	switch x.Task {
@@ -98,6 +105,8 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 		e.execute = e.convertToText
 	case taskConvertToImages:
 		e.execute = e.convertDocumentToImages
+	case taskSplitInPages:
+		e.execute = e.splitInPages
 	default:
 		return nil, fmt.Errorf("%s task is not supported", x.Task)
 	}

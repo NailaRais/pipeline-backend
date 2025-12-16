@@ -1,12 +1,11 @@
 # Contributing Guidelines
 
-## Introduction
-
 This document will guide you through the steps to contribute with a new
 component. You'll add and test an operator that takes a string `target` as input
-and returns a `"Hello, ${target}!"` string as the component output
+and returns a `"Hello, ${target}!"` string as the component output.
 
 In order to add a new component, you need to:
+
 - Define the component configuration. This will determine the tasks that can be
   performed by the component and their input and output parameters. The
   console frontend will use the configuration files to render the component
@@ -16,27 +15,28 @@ In order to add a new component, you need to:
 - Initialize the component, i.e., include the implementation of the component
   interfaces as a dependency in the `pipeline-backend` execution.
 
-### Prerequisites
+## Prerequisites
 
 This guide builds on top of other documents:
 
 - `pipeline-backend`'s [README](../../README.md) explains the basic concepts in
-  the VDP domain.
+  the Instill Core domain.
 - `component`'s [README](./README.md) digs deeper into the **Component** entity,
   its structure and functionalities.
 - The repository's [contribution guidelines](../../.github/CONTRIBUTING.md)
   document the conventions you'll need to follow when contributing to this
   repository. They also contain a guide on how to set your development
-  environment, in case you want to [see your component in
-  action](#use-the-component-in-vdp).
-- If you find yourself wanting to know more, visit the [Instill
-  Docs](https://www.instill.tech/docs).
+  environment, in case you want to [see your component in action](#use-the-component-in-instill-core-pipeline).
+- If you find yourself wanting to know more, visit the [Instill Core
+  Docs](https://docs.instill-ai.com).
+
+## Component
 
 ### Create the component package
 
-```sh
-$ cd $MY_WORKSPACE/pipeline-backend/pkg/component
-$ mkdir -p operator/hello/v0 && cd $_
+```shell
+cd $MY_WORKSPACE/pipeline-backend/pkg/component
+mkdir -p operator/hello/v0 && cd $_
 ```
 
 Components are isolated in their own packages under their component type (`ai`,
@@ -47,15 +47,15 @@ being triggered.
 
 At the end of this guide, this will be the structure of the package:
 
-```
+```shell
 operator/hello/v0
  ├──.compogen
  │  └──extra-bottom.mdx
  ├──assets
  │  └──hello.svg
  ├──config
- │  ├──definition.json
- │  └──tasks.json
+ │  ├──definition.yaml
+ │  └──tasks.yaml
  ├──main.go
  ├──main_test.go
  └──README.mdx
@@ -63,33 +63,30 @@ operator/hello/v0
 
 ### Add the configuration files
 
-Create a `config` directory and add the files `definition.json`, `tasks.json`,
-and `setup.json` (optional). Together, these files define the behavior of the
+Create a `config` directory and add the files `definition.yaml`, `tasks.yaml`,
+and `setup.yaml` (optional). Together, these files define the behavior of the
 component.
 
-#### `definition.json`
+#### `definition.yaml`
 
-The `definition.json` file describes the high-level information of the
+The `definition.yaml` file describes the high-level information of the
 component.
 
-```json
-{
-  "id": "hello",
-  "uid": "e05d3d71-779c-45f8-904d-e90a050ca3b2",
-  "title": "Hello",
-  "type": "COMPONENT_TYPE_OPERATOR",
-  "description": "'Hello, world' operator used as a template for adding components",
-  "spec": {},
-  "availableTasks": [
-    "TASK_GREET"
-  ],
-  "documentationUrl": "https://www.instill.tech/docs/component/operator/hello",
-  "icon": "assets/hello.svg",
-  "version": "0.1.0",
-  "sourceUrl": "https://github.com/instill-ai/pipeline-backend/pkg/component/blob/main/operator/hello/v0",
-  "releaseStage": "RELEASE_STAGE_ALPHA",
-  "public": true
-}
+```yaml
+id: hello
+uid: e05d3d71-779c-45f8-904d-e90a050ca3b2
+title: Hello
+type: COMPONENT_TYPE_OPERATOR
+description: `Hello, world` operator used as a template for adding components.
+spec: {}
+availableTasks:
+  - TASK_GREET
+documentationUrl: https://docs.instill-ai.com/docs/hello
+icon: assets/hello.svg
+version: 0.1.0
+sourceUrl: https://github.com/instill-ai/pipeline-backend/pkg/component/blob/main/operator/hello/v0
+releaseStage: RELEASE_STAGE_ALPHA
+public: true
 ```
 
 This file defines the component properties:
@@ -106,7 +103,7 @@ This file defines the component properties:
 - **`availableTasks`** defines the tasks the component can perform.
   - When a component is created in a pipeline, one of the tasks has to be
     selected, i.e., a configured component can only execute one task.
-  - Task configurations are defined in `tasks.json`.
+  - Task configurations are defined in `tasks.yaml`.
 - **`documentationUrl`** points to the official documentation of the component.
 - **`icon`** is the local path to the icon that will be displayed in the console
   when creating the component. If left blank, a placeholder icon will be shown.
@@ -115,7 +112,7 @@ This file defines the component properties:
 - **`sourceUrl`** points to the codebase that implements the component. This
   will be used by the documentation generation tool and also will be part of the
   [component definition
-  list](https://openapi.instill.tech/reference/pipelinepublicservice_listcomponentdefinitions)
+  list](https://openapi.instill-ai.dev/reference/pipelinepublicservice_listcomponentdefinitions)
   endpoint.
 - **`releaseStage`** describes the release stage of the component. Unimplemented
   stages (`RELEASE_STAGE_COMING_SOON` or `RELEASE_STAGE_OPEN_FOR_CONTRIBUTION`)
@@ -123,133 +120,106 @@ This file defines the component properties:
   pipelines) but they will appear in the component definition list endpoint.
 - **`public`** indicates whether the component is visible to the public.
 
+#### `tasks.yaml`
 
-#### `tasks.json`
-
-The `tasks.json` file describes the task details of the component. The key
+The `tasks.yaml` file describes the task details of the component. The key
 should be in the format `TASK_NAME`.
 
-```json
-{
-  "TASK_GREET": {
-    "instillShortDescription": "Greet someone / something",
-    "title": "Greet",
-    "input": {
-      "description": "Input",
-      "instillUIOrder": 0,
-      "properties": {
-        "target": {
-          "instillUIOrder": 0,
-          "description": "The target of the greeting",
-          "instillAcceptFormats": [
-            "string"
-          ],
-          "instillUpstreamTypes": [
-            "value",
-            "reference",
-            "template"
-          ],
-          "instillUIMultiline": true,
-          "title": "Greeting target",
-          "type": "string"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "title": "Input",
-      "type": "object"
-    },
-    "output": {
-      "description": "The greeting sentence",
-      "instillUIOrder": 0,
-      "properties": {
-        "greeting": {
-          "description": "A greeting sentence addressed to the target",
-          "instillUIOrder": 0,
-          "required": [],
-          "title": "Greeting",
-          "type": "string",
-          "instillFormat": "string"
-        }
-      },
-      "required": [
-        "greeting"
-      ],
-      "title": "Output",
-      "type": "object"
-    }
-  }
-}
+```yaml
+TASK_GREET:
+  shortDescription: Greet someone / something
+  title: Greet
+  input:
+    description: Input
+    uiOrder: 0
+    properties:
+      target:
+        uiOrder: 0
+        description: The target of the greeting
+        type: string
+        title: Greeting target
+    required:
+      - target
+    title: Input
+    type: object
+  output:
+    description: The greeting sentence
+    uiOrder: 0
+    properties:
+      greeting:
+        description: A greeting sentence addressed to the target
+        uiOrder: 0
+        required: []
+        title: Greeting
+        type: string
+    required:
+      - greeting
+    title: Output
+    type: object
 ```
 
 This file defines the input and output schema of each task:
 
-**Properties within a Task**
+#### Properties within a Task
 
 - **`title`** is used by the console to provide the title of the task in the
   component.
-- **`description`** and **`instillShortDescription`** are used by the console to
+- **`description`** and **`shortDescription`** are used by the console to
   provide a description of the task in the component. If
-  **`instillShortDescription`** does not exist, it will be the same as
+  **`shortDescription`** does not exist, it will be the same as
   **`description`**.
-- **`input`** is a JSON Schema that describes the input of the task.
-- **`output`** is a JSON Schema that describes the output of the task.
+- **`input`** is a schema that describes the input of the task.
+- **`output`** is a schema that describes the output of the task.
 
-**Properties within `input` and `output` Objects**
+#### Properties within `input` and `output` Objects
 
 - **`required`** indicates whether the property is required.
-- **`type`**: describes the JSON type of this field, which could be `integer`,
-  `number`, `boolean`, `string`, `array`, or `object`.
+- **`type`**: describes the format of this field, which could be `string`,
+  `number`, `boolean`, `file`, `document`, `image`, `video`, `audio`, `array`,
+  or `object`.
 - **`title`** is used by the console to provide the title of the property in the component.
 - **`description`** is used by the console to provide information about this
   task in the component.
-- **`instillShortDescription`**: is a concise version of `description`, used to
+- **`shortDescription`**: is a concise version of `description`, used to
   fit smaller spaces such as a component form field. If this value is empty, the
   `description` value will be used.
-- **`instillUIOrder`** defines the order in which the properties will be
+- **`uiOrder`** defines the order in which the properties will be
   rendered in the component.
-- **`instillUIMultiline`** indicates whether the text field in the component is
-  multiline.
 
 **Properties within `input` Objects**
 
-- **`instillEditOnNodeFields`** determines whether this field will appear at the
-  forefront of the component. Optional properties can be set in the
-  advanced configuration.
-- **`instillAcceptFormats`** is an array indicating the data types of acceptable
-  input fields. It should be an array of [**Instill
-  Format**](https://www.instill.tech/docs/vdp/instill-format).
-- **`instillUpstreamTypes`** defines how an input property can be set: as a
-  direct value, a reference to another value in the pipeline, or a combination
-  of both (e.g., `${variable.name}` or `my dear ${variable.name}`).
+- **`type`** indicates the data type of the output field, which should be one
+  of `string`, `number`, `boolean`, `file`, `document`, `image`, `video`,
+  `audio`, `array`, or `object`. Please refer to [**Instill
+  Format**](https://docs.instill-ai.com/docs/instill-types) for more details.
+
 - **`instillSecret`** indicates the data must reference the secrets and cannot
   be used in plaintext.
 
 **Properties within `output` Objects**
 
-- **`instillFormat`** indicates the data type of the output field, which should
-  be one of `number`, `integer`, `string`, `object`, `boolean`, or MIME type.
-  Please refer to [**Instill
-  Format**](https://www.instill.tech/docs/vdp/instill-format) for more details.
+- **`type`** indicates the data type of the output field, which should be one
+  of `string`, `number`, `boolean`, `file`, `document`, `image`, `video`,
+  `audio`, `array`, or `object`. Please refer to [**Instill
+  Format**](https://docs.instill-ai.com/docs/instill-types) for more details.
 
 See the [example recipe](#example-recipe) to understand how these fields map to
 the recipe of a pipeline when configured to use this operator.
 
-#### `setup.json`
+#### `setup.yaml`
 
 For components that need to set up some configuration before execution
 (typically, components that connect with 3rd party applications or services that
-need to set up a connection), `setup.json` can be used to describe these
-configurations. The format is the same as the `input` objects in `tasks.json`.
+need to set up a connection), `setup.yaml` can be used to describe these
+configurations. The format is the same as the `input` objects in `tasks.yaml`.
 
 The setup of a component can be defined within the recipe as key-value fields,
 or as a reference to a **Connection** (see the
-[**Integrations**](https://www.instill.tech/docs/vdp/integration) doc for more
+[**Integrations**](https://docs.instill-ai.com/docs/set-up-component) doc for more
 information). Certain components support OAuth 2.0 integrations. If you want
 your component to support this sort of connection:
 
-- In `setup.json`, add the OAuth information under the  `instillOAuthConfig`
+- In `setup.yaml`, add the OAuth information under the  `instillOAuthConfig`
   property.
   - `authUrl` contains the address where the authorization code can be
     requested.
@@ -264,7 +234,7 @@ your component to support this sort of connection:
 - The OAuth 2.0 exchange for an access token is implemented in the frontend.
   Make sure to engage with [Instill
   Product](https://github.com/orgs/instill-ai/teams/product) in order to
-  prioritise the OAuth support for this component.
+  prioritize the OAuth support for this component.
 
 ### Implement the component interfaces
 
@@ -272,10 +242,11 @@ Pipeline communicates with components through the `IComponent` interface,
 defined in the [`base`](../base) package. This package also defines base
 implementations for these interfaces, so the `hello` component will only need to
 override the following methods:
+
 - `CreateExecution(ComponentExecution)
   (IExecution, error)` will return an implementation of the `IExecution`
   interface. A base execution implementation is passed in order to define only
-  the behaviour of the `Execute` method.
+  the behavior of the `Execute` method.
 - `Execute(context.Context []*structpb.Struct) ([]*structpb.Struct, error)` is
   the most important function in the component. All the data manipulation will
   take place here.
@@ -301,10 +272,10 @@ const (
 )
 
 var (
-  //go:embed config/definition.json
-  definitionJSON []byte
-  //go:embed config/tasks.json
-  tasksJSON []byte
+  //go:embed config/definition.yaml
+  definitionYAML []byte
+  //go:embed config/tasks.yaml
+  tasksYAML []byte
 
   once   sync.Once
   comp   *component
@@ -319,7 +290,7 @@ type component struct {
 func Init(bc base.Component) *component {
   once.Do(func() {
     comp = &component{Component: bc}
-    err := comp.LoadDefinition(definitionJSON, nil, tasksJSON, nil)
+    err := comp.LoadDefinition(definitionYAML, nil, tasksYAML, nil)
     if err != nil {
       panic(err)
     }
@@ -423,7 +394,7 @@ func (e *execution) greet(in *structpb.Struct) (*structpb.Struct, error) {
 
   greetee := in.Fields["target"].GetStringValue()
   if greetee == "Voldemort" {
-    return nil, errmsg.AddMessage(fmt.Errorf("invalid greetee"), "He-Who-Must-Not-Be-Named can't be greeted.")
+    return nil, errorsx.AddMessage(fmt.Errorf("invalid greetee"), "He-Who-Must-Not-Be-Named can't be greeted.")
   }
 
   greeting := "Hello, " + greetee + "!"
@@ -441,8 +412,8 @@ to return a human-friendly errors to the API clients and console users.
 
 #### Unit tests
 
-Before initializing testing your component in **💧 Instill VDP**, we can unit
-test its behaviour. The following code covers the newly added logic by
+Before initializing testing your component in **Instill Core**, we can unit
+test its behavior. The following code covers the newly added logic by
 replicating how the `pipeline-backend` workers execute the component logic.
 Create a `main_test.go` file containing the following code:
 
@@ -518,7 +489,7 @@ func TestOperator_Execute(t *testing.T) {
 
     err = x.Execute(ctx, []*base.Job{job})
     c.Assert(err, qt.ErrorMatches, "invalid greetee")
-    c.Assert(errmsg.Message(err), qt.Matches, "He-Who-Must-Not-Be-Named can't be greeted.")
+    c.Assert(errorsx.Message(err), qt.Matches, "He-Who-Must-Not-Be-Named can't be greeted.")
   })
 }
 
@@ -540,7 +511,6 @@ func TestOperator_CreateExecution(t *testing.T) {
 }
 ```
 
-
 In our testing methodology, we use two main approaches for mocking external services:
 
 1. In some components, we mock only the interface and skip testing the actual client, as with services like Slack and HubSpot.
@@ -548,10 +518,9 @@ In our testing methodology, we use two main approaches for mocking external serv
 
 Moving forward, we plan to standardize on the second approach, integrating all components to use a fake server setup for testing.
 
-
 ### Initialize the component
 
-The last step before being able to use the component in **💧 Instill VDP** is
+The last step before being able to use the component in **Instill Core** is
 loading the `hello` operator. This is done in the `Init` function in
 [`store.go`](./store/store.go):
 
@@ -581,15 +550,15 @@ func Init(logger *zap.Logger) *Store {
 }
 ```
 
-### Use the component in 💧 Instill VDP
+### Use the component in Instill Core Pipeline
 
 Re-run your local `pipeline-backend` build:
 
-```sh
-$ make rm && make dev
-$ docker exec pipeline-backend go run ./cmd/init # this will load the new component into the database
-$ docker exec -d pipeline-backend go run ./cmd/worker # run without -d in a separate terminal if you want to access the logs
-$ docker exec pipeline-backend go run ./cmd/main
+```shell
+make rm && make dev
+docker exec pipeline-backend go run ./cmd/init # this will load the new component into the database
+docker exec -d pipeline-backend go run ./cmd/worker # run without -d in a separate terminal if you want to access the logs
+docker exec pipeline-backend go run ./cmd/main
 ```
 
 Head to the console at http://localhost:3000/ (default password is `password`)
@@ -613,7 +582,7 @@ variable:
   who:
     title: Who
     description: Who should be greeted?
-    instill-format: string
+    type: string
 component:
   hello-0:
     type: hello
@@ -631,8 +600,8 @@ output:
 
 Documentation helps user to integrate the component in their pipelines. A good
 component definition will have clear names for their fields, which will also
-contain useful descriptions. The information described in `definition.json` and
-`tasks.json` is enough to understand how a component should be used. `compogen`
+contain useful descriptions. The information described in `definition.yaml` and
+`tasks.yaml` is enough to understand how a component should be used. `compogen`
 is a tool that parses the component configuration and builds a `README.mdx` file
 document displaying its information in a human-readable way. To generate the
 document, just add the following line on top of `operator/hello/v0/main.go`:
@@ -643,8 +612,8 @@ document, just add the following line on top of `operator/hello/v0/main.go`:
 
 Then, go to the base of the `pipeline-backend` repository and run:
 
-```sh
-$ make gen-component-doc
+```shell
+make gen-component-doc
 ```
 
 #### Adding extra sections
@@ -652,9 +621,9 @@ $ make gen-component-doc
 The documentation of the component can be extended with the `--extraContents`
 flag:
 
-```sh
-$ mkdir -p operator/hello/.compogen
-$ echo '### Final words
+```shell
+mkdir -p operator/hello/.compogen
+echo '### Final words
 
 Thank you for reading!' > operator/hello/.compogen/extra-bottom.mdx
 ```
@@ -679,13 +648,13 @@ Semantic Versioning guidelines.
   - At this point, since there might be pipelines using the previous version, a
     new package MUST be created. E.g., `operator/json/v0` -> `operator/json/v1`.
 - Build and pre-release labels are discouraged, as components are shipped as
-  part of **💧 Instill VDP** and they aren't likely to need such fine-grained
+  part of **Instill Core Pipeline** and they aren't likely to need such fine-grained
   version control.
 
 It is recommended to start a component at `v0.1.0`. A major version 0 is
 intended for rapid development.
 
-The `releaseStage` property in `definition.json` indicates the stability of a
+The `releaseStage` property in `definition.yaml` indicates the stability of a
 component.
 
 - A component skeleton (with only the minimal configuration files and a dummy

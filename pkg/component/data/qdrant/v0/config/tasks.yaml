@@ -1,0 +1,360 @@
+TASK_VECTOR_SEARCH:
+  shortDescription: Perform a vector search on a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to perform vector similarity search on.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+      vector:
+        description: An array of dimensions for the vector query.
+        type: array
+        uiOrder: 1
+        items:
+          description: A dimension of the vector.
+          example: 0.8167237
+          type: number
+        minItems: 1
+        title: Vector
+      limit:
+        description: The limit of points, empty for all points.
+        type: integer
+        shortDescription: Limit Rows
+        uiOrder: 2
+        title: Limit
+      payloads:
+        description: The payloads to return in the points. If empty then all payloads will be returned.
+        type: array
+        shortDescription: Payloads to be returned, empty for all payloads
+        uiOrder: 3
+        title: Payloads
+        minItems: 1
+        items:
+          title: Field
+          type: string
+      filter:
+        description: The properties filter to be applied to the data with Qdrant filter, please refer to [filter section](https://api.qdrant.tech/api-reference/search/points).
+        type: object
+        uiOrder: 4
+        title: Filter
+        required: []
+      params:
+        description: The additional parameters to be passed to the search, please refer to [params section](https://api.qdrant.tech/api-reference/search/points).
+        type: object
+        uiOrder: 5
+        title: Params
+        required: []
+      min-score:
+        description: The minimum score of the points to be returned.
+        type: number
+        uiOrder: 6
+        title: Min Score
+    required:
+      - collection-name
+      - vector
+      - limit
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Vector search status.
+        uiOrder: 0
+        title: Status
+        type: string
+      result:
+        description: Result of the vector search operation.
+        uiOrder: 0
+        title: Result
+        properties:
+          ids:
+            description: The ids returned from the vector search operation.
+            uiOrder: 0
+            title: IDs
+            required: []
+            items:
+              description: An id of the point.
+              example: c8faa-4b3b-4b3b-4b3b
+              type: string
+            type: array
+          points:
+            description: The points returned from the vector search operation.
+            uiOrder: 1
+            required: []
+            title: Points
+            items:
+              title: Point
+              type: object
+              required: []
+            type: array
+          vectors:
+            description: The vectors returned from the vector search operation.
+            uiOrder: 2
+            title: Vectors
+            required: []
+            items:
+              description: The vector from array vectors.
+              required: []
+              items:
+                description: A dimension of the vector.
+                example: 0.8167237
+                type: number
+              type: array
+            type: array
+          metadata:
+            description: The metadata returned from the vector search operation.
+            uiOrder: 3
+            title: Metadata
+            required: []
+            items:
+              title: Metadatum
+              type: object
+              required: []
+            type: array
+        required: []
+        type: object
+    required:
+      - status
+      - result
+    title: Output
+    type: object
+TASK_BATCH_UPSERT:
+  shortDescription: Insert multiple vector points into a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to upsert the point into.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+      array-id:
+        description: The array of id.
+        type: array
+        uiOrder: 1
+        items:
+          description: An id of the point.
+          example: 1
+          type: string
+        minItems: 1
+        title: Array ID
+      array-metadata:
+        description: The array of vector metadata payload.
+        type: array
+        uiOrder: 2
+        minItems: 1
+        title: Array Metadata
+        items:
+          description: The vector metadata payload.
+          title: Metadatum
+          required: []
+          type: object
+      array-vector:
+        description: The array of vector values.
+        type: array
+        uiOrder: 3
+        items:
+          description: An array of dimensions for the vector value.
+          type: array
+          items:
+            description: A dimension of the vector.
+            example: 0.8167237
+            type: number
+        minItems: 1
+        title: Array Vector
+      ordering:
+        description: The ordering guarantees of the batch upsert.
+        type: string
+        default: weak
+        uiOrder: 4
+        title: Ordering
+        enum:
+          - weak
+          - medium
+          - strong
+    required:
+      - collection-name
+      - array-id
+      - array-vector
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Batch upsert status.
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_UPSERT:
+  shortDescription: Upsert a vector point into a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to upsert the point into.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+      id:
+        description: The ID of the point.
+        type: string
+        uiOrder: 1
+        title: ID
+      metadata:
+        description: The vector metadata payload.
+        type: object
+        uiOrder: 2
+        title: Metadata
+        required: []
+      vector:
+        description: An array of dimensions for the vector value.
+        type: array
+        uiOrder: 3
+        items:
+          description: A dimension of the vector.
+          example: 0.8167237
+          type: number
+        minItems: 1
+        title: Vector
+      ordering:
+        description: The ordering guarantees of the batch upsert.
+        type: string
+        default: weak
+        uiOrder: 4
+        title: Ordering
+        enum:
+          - weak
+          - medium
+          - strong
+    required:
+      - collection-name
+      - id
+      - vector
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Upsert status.
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_DELETE:
+  shortDescription: Delete vector points from a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to delete the object from.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+      id:
+        description: The ID of the point.
+        type: string
+        uiOrder: 1
+        title: ID
+      filter:
+        description: The properties filter to be applied to the data with Qdrant filter, please refer to [filter section](https://api.qdrant.tech/api-reference/points/delete-points).
+        type: object
+        uiOrder: 2
+        title: Filter
+        required: []
+      ordering:
+        description: The ordering guarantees of the batch upsert.
+        type: string
+        default: weak
+        uiOrder: 3
+        title: Ordering
+        enum:
+          - weak
+          - medium
+          - strong
+    required:
+      - collection-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Delete status.
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_CREATE_COLLECTION:
+  shortDescription: Create a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to create.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+      config:
+        description: The configuration of the collection. Please refer to [here](https://api.qdrant.tech/api-reference/collections/create-collection).
+        type: object
+        uiOrder: 1
+        title: Config
+        required: []
+    required:
+      - collection-name
+      - config
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Create collection status.
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_DELETE_COLLECTION:
+  shortDescription: Delete a collection
+  input:
+    uiOrder: 0
+    properties:
+      collection-name:
+        description: The name of the collection to delete.
+        type: string
+        uiOrder: 0
+        title: Collection Name
+    required:
+      - collection-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Delete collection status.
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object

@@ -26,12 +26,12 @@ const (
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/setup.json
-	setupJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/setup.yaml
+	setupYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -100,7 +100,7 @@ type source struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -224,7 +224,7 @@ func (e *execution) generateText(ctx context.Context, job *base.Job) error {
 
 	promptImages := inputStruct.PromptImages
 	for _, image := range promptImages {
-		extension := base.GetBase64FileExtension(image)
+		extension := util.GetBase64FileExtension(image)
 		// check if the image extension is supported
 		if !slices.Contains(supportedImageExtensions, extension) {
 			job.Error.Error(ctx, err)

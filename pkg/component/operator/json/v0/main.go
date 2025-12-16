@@ -14,20 +14,22 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
-	"github.com/instill-ai/x/errmsg"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 const (
-	taskMarshal   = "TASK_MARSHAL"
-	taskUnmarshal = "TASK_UNMARSHAL"
-	taskJQ        = "TASK_JQ"
+	taskMarshal      = "TASK_MARSHAL"
+	taskUnmarshal    = "TASK_UNMARSHAL"
+	taskJQ           = "TASK_JQ"
+	taskRenameFields = "TASK_RENAME_FIELDS"
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -47,7 +49,7 @@ type execution struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, nil, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, nil, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -67,8 +69,10 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 		e.execute = e.unmarshal
 	case taskJQ:
 		e.execute = e.jq
+	case taskRenameFields:
+		e.execute = e.renameFields
 	default:
-		return nil, errmsg.AddMessage(
+		return nil, errorsx.AddMessage(
 			fmt.Errorf("not supported task: %s", x.Task),
 			fmt.Sprintf("%s task is not supported.", x.Task),
 		)
@@ -81,7 +85,7 @@ func (e *execution) marshal(in *structpb.Struct) (*structpb.Struct, error) {
 
 	b, err := protojson.Marshal(in.Fields["json"])
 	if err != nil {
-		return nil, errmsg.AddMessage(err, "Couldn't convert the provided object to JSON.")
+		return nil, errorsx.AddMessage(err, "Couldn't convert the provided object to JSON.")
 	}
 
 	out.Fields = map[string]*structpb.Value{
@@ -97,7 +101,7 @@ func (e *execution) unmarshal(in *structpb.Struct) (*structpb.Struct, error) {
 	b := []byte(in.Fields["string"].GetStringValue())
 	obj := new(structpb.Value)
 	if err := protojson.Unmarshal(b, obj); err != nil {
-		return nil, errmsg.AddMessage(err, "Couldn't parse the JSON string. Please check the syntax is correct.")
+		return nil, errorsx.AddMessage(err, "Couldn't parse the JSON string. Please check the syntax is correct.")
 	}
 
 	out.Fields = map[string]*structpb.Value{"json": obj}
@@ -112,7 +116,7 @@ func (e *execution) jq(in *structpb.Struct) (*structpb.Struct, error) {
 	if input == nil {
 		b := []byte(in.Fields["json-string"].GetStringValue())
 		if err := json.Unmarshal(b, &input); err != nil {
-			return nil, errmsg.AddMessage(err, "Couldn't parse the JSON input. Please check the syntax is correct.")
+			return nil, errorsx.AddMessage(err, "Couldn't parse the JSON input. Please check the syntax is correct.")
 		}
 	}
 
@@ -121,7 +125,7 @@ func (e *execution) jq(in *structpb.Struct) (*structpb.Struct, error) {
 	if err != nil {
 		// Error messages from gojq are human-friendly enough.
 		msg := fmt.Sprintf("Couldn't parse the jq filter: %s. Please check the syntax is correct.", err.Error())
-		return nil, errmsg.AddMessage(err, msg)
+		return nil, errorsx.AddMessage(err, msg)
 	}
 
 	results := []any{}
@@ -134,7 +138,7 @@ func (e *execution) jq(in *structpb.Struct) (*structpb.Struct, error) {
 
 		if err, ok := v.(error); ok {
 			msg := fmt.Sprintf("Couldn't apply the jq filter: %s.", err.Error())
-			return nil, errmsg.AddMessage(err, msg)
+			return nil, errorsx.AddMessage(err, msg)
 		}
 
 		results = append(results, v)
@@ -147,6 +151,65 @@ func (e *execution) jq(in *structpb.Struct) (*structpb.Struct, error) {
 
 	out.Fields = map[string]*structpb.Value{
 		"results": structpb.NewListValue(list),
+	}
+
+	return out, nil
+}
+
+func (e *execution) renameFields(in *structpb.Struct) (*structpb.Struct, error) {
+	out := new(structpb.Struct)
+
+	jsonField, ok := in.Fields["json"]
+	if !ok || jsonField == nil {
+		return nil, errorsx.AddMessage(fmt.Errorf("missing required field: json"), "JSON and fields are required.")
+	}
+	jsonValue := jsonField.AsInterface().(map[string]any)
+
+	fieldsValue, ok := in.Fields["fields"]
+	if !ok || fieldsValue == nil || len(fieldsValue.GetListValue().Values) == 0 {
+		return nil, errorsx.AddMessage(fmt.Errorf("missing required field: fields"), "JSON and fields are required.")
+	}
+	fields := fieldsValue.GetListValue().Values
+
+	// Conflict resolution strategy validation
+	conflictResolution := in.Fields["conflict-resolution"].GetStringValue()
+	if conflictResolution != "overwrite" && conflictResolution != "skip" && conflictResolution != "error" {
+		return nil, errorsx.AddMessage(fmt.Errorf("invalid conflict resolution strategy"), "Conflict resolution strategy is invalid.")
+	}
+
+	// Process renaming fields with conflict resolution
+	for _, field := range fields {
+		from := field.GetStructValue().Fields["from"].GetStringValue()
+		to := field.GetStructValue().Fields["to"].GetStringValue()
+
+		if val, ok := jsonValue[from]; ok {
+			switch conflictResolution {
+			case "overwrite":
+				delete(jsonValue, from)
+				jsonValue[to] = val
+			case "skip":
+				if _, exists := jsonValue[to]; !exists {
+					jsonValue[to] = val
+				}
+				delete(jsonValue, from)
+			case "error":
+				if _, exists := jsonValue[to]; exists {
+					return nil, errorsx.AddMessage(fmt.Errorf("field conflict: '%s' already exists", to), "Field conflict.")
+				}
+				delete(jsonValue, from)
+				jsonValue[to] = val
+			}
+		}
+	}
+
+	// Convert to structpb.Struct and assign to output
+	structValue, err := structpb.NewStruct(jsonValue)
+	if err != nil {
+		return nil, errorsx.AddMessage(err, "Failed to create structpb.Struct for output.")
+	}
+
+	out.Fields = map[string]*structpb.Value{
+		"json": structpb.NewStructValue(structValue),
 	}
 
 	return out, nil

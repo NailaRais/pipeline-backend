@@ -1,0 +1,510 @@
+TASK_INDEX:
+  shortDescription: Index a document into Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+      id:
+        description: The ID of the document.
+        type: string
+        uiOrder: 1
+        title: ID
+      data:
+        description: Data to be indexed.
+        type: object
+        uiOrder: 2
+        title: Data
+        required: []
+    required:
+      - index-name
+      - data
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Index operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_MULTI_INDEX:
+  shortDescription: Index multiple documents into Elasticsearch with bulk API
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+      array-id:
+        description: The array of id.
+        type: array
+        uiOrder: 1
+        items:
+          description: An id of the document.
+          example: 1
+          type: string
+        minItems: 1
+        title: Array ID
+      array-data:
+        description: Array data to be indexed.
+        type: array
+        uiOrder: 2
+        title: Array Data
+        items:
+          description: The data to be inserted.
+          title: Data
+          required: []
+          type: object
+        minItems: 1
+    required:
+      - index-name
+      - array-data
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Index operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_UPDATE:
+  shortDescription: Update a document in Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+      id:
+        description: The ID of the document.
+        type: string
+        uiOrder: 1
+        title: ID
+      query:
+        description: >-
+          Full text search query for update task, query will be prioritised over filter if both are provided, if both query and filter are not
+          provided, all documents will be selected.
+        type: string
+        shortDescription: Full text search query, (empty for all documents)
+        uiOrder: 2
+        title: Query
+      filter:
+        description: The query dsl filter which starts with "query" field, please refer to [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-filter-context.html).
+        type: object
+        uiOrder: 3
+        title: Filter
+        required: []
+      filter-sql:
+        shortDescription: The filter sql to be applied to the data, if filter or id is provided, this field will be ignored
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause, empty for no filter.
+        uiOrder: 4
+        type: string
+        title: Filter SQL
+      update-data:
+        description: Update data.
+        type: object
+        uiOrder: 4
+        title: Update
+        required: []
+    required:
+      - index-name
+      - update-data
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Update operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_SEARCH:
+  shortDescription: Search for documents in Elasticsearch, support full text search
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 1
+        title: Index Name
+      id:
+        description: The ID of the document.
+        type: string
+        uiOrder: 2
+        title: ID
+      query:
+        description: >-
+          Full text search query for search task, query will be prioritised over filter if both are provided, if both query and filter are not
+          provided, all documents will be selected.
+        type: string
+        shortDescription: Full text search query, (empty for all documents)
+        uiOrder: 3
+        title: Query
+      filter:
+        description: The query dsl filter which starts with "query" field, please refer to [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-filter-context.html).
+        type: object
+        uiOrder: 4
+        title: Filter
+        required: []
+      filter-sql:
+        shortDescription: The filter sql to be applied to the data, if filter or id is provided, this field will be ignored
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause, empty for no filter.
+        uiOrder: 5
+        type: string
+        title: Filter SQL
+      size:
+        description: Number of documents to return. If empty then all documents will be returned.
+        type: integer
+        shortDescription: Size of documents to return, (empty for all documents)
+        uiOrder: 6
+        title: Size
+      fields:
+        description: The fields to return in the documents. If empty then all fields will be returned.
+        type: array
+        shortDescription: Fields to be returned, empty for all fields
+        uiOrder: 7
+        title: Fields
+        items:
+          title: Field
+          type: string
+        minItems: 1
+      min-score:
+        description: Minimum score to consider for search results. If empty then no minimum score will be considered.
+        type: number
+        shortDescription: Minimum Score
+        uiOrder: 8
+        title: Minimum Score
+    required:
+      - index-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Search operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+      result:
+        description: Result of the search operation.
+        uiOrder: 1
+        title: Result
+        properties:
+          ids:
+            description: The ids returned from the search operation.
+            uiOrder: 0
+            title: IDs
+            required: []
+            items:
+              description: An id of the document.
+              example: c8faa-4b3b-4b3b-4b3b
+              type: string
+            type: array
+          documents:
+            description: The documents returned from the search operation.
+            uiOrder: 1
+            required: []
+            title: Documents
+            items:
+              title: Document
+              type: object
+              required: []
+            type: array
+          data:
+            description: The data returned from the search operation.
+            uiOrder: 2
+            title: Data
+            required: []
+            items:
+              title: Datum
+              type: object
+              required: []
+            type: array
+        required: []
+        type: object
+    required:
+      - result
+      - status
+    title: Output
+    type: object
+TASK_VECTOR_SEARCH:
+  shortDescription: Search for vector similarity search in Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 1
+        title: Index Name
+      field:
+        description: Field name of the vector to search for similar vectors.
+        type: string
+        shortDescription: Field name of the vector
+        uiOrder: 2
+        title: Field
+      query-vector:
+        description: Query vector to search for similar vectors.
+        type: array
+        uiOrder: 3
+        items:
+          description: A dimension of the vector.
+          example: 0.8167237
+          type: number
+        minItems: 1
+        title: Query Vector
+      k:
+        description: K of documents to do kNN vector search.
+        type: integer
+        shortDescription: K of documents to return
+        uiOrder: 4
+        title: K
+      num-candidates:
+        description: Number of candidates to be considered for kNN vector search. Default to 2 times of k.
+        type: integer
+        shortDescription: Number of candidates to be considered for kNN, default to 2 times of k
+        uiOrder: 5
+        title: Num Candidates
+      filter:
+        description: The query dsl filter which starts with "filter" field, please refer to [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html#knn-search-filter-example).
+        type: object
+        uiOrder: 6
+        title: Filter
+        required: []
+      filter-sql:
+        shortDescription: The filter sql to be applied to the data, if filter or id is provided, this field will be ignored
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause, empty for no filter.
+        uiOrder: 7
+        type: string
+        title: Filter SQL
+      fields:
+        description: The fields to return in the documents. If empty then all fields will be returned.
+        type: array
+        shortDescription: Fields to be returned, empty for all fields
+        uiOrder: 8
+        title: Fields
+        items:
+          title: Field
+          type: string
+        minItems: 1
+      min-score:
+        description: Minimum score to consider for search results. If empty then no minimum score will be considered.
+        type: number
+        shortDescription: Minimum Score
+        uiOrder: 9
+        title: Minimum Score
+    required:
+      - index-name
+      - field
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Search operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+      result:
+        description: Result of the vector search operation.
+        uiOrder: 1
+        title: Result
+        properties:
+          ids:
+            description: The ids returned from the vector search operation.
+            uiOrder: 0
+            title: IDs
+            required: []
+            items:
+              description: An id of the document.
+              example: c8faa-4b3b-4b3b-4b3b
+              type: string
+            type: array
+          documents:
+            description: The documents returned from the vector search operation.
+            uiOrder: 1
+            required: []
+            title: Documents
+            items:
+              title: Document
+              type: object
+              required: []
+            type: array
+          vectors:
+            description: The vectors returned from the vector search operation.
+            uiOrder: 2
+            title: Vectors
+            required: []
+            items:
+              description: The vector from array vectors.
+              required: []
+              items:
+                description: A dimension of the vector.
+                example: 0.8167237
+                type: number
+              type: array
+            type: array
+          metadata:
+            description: The metadata returned from the vector search operation.
+            uiOrder: 3
+            title: Metadata
+            required: []
+            items:
+              title: Metadatum
+              type: object
+              required: []
+            type: array
+        required: []
+        type: object
+    required:
+      - result
+      - status
+    title: Output
+    type: object
+TASK_DELETE:
+  shortDescription: Delete documents from Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+      id:
+        description: The ID of the document.
+        type: string
+        uiOrder: 1
+        title: ID
+      query:
+        description: >-
+          Full text search query for delete task, query will be prioritised over filter if both are provided, if both query and filter are not
+          provided, all documents will be selected.
+        type: string
+        shortDescription: Full text search query, (empty for all documents)
+        uiOrder: 2
+        title: Query
+      filter:
+        description: The query dsl filter which starts with "query" field, please refer to [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-filter-context.html).
+        type: object
+        uiOrder: 3
+        title: Filter
+        required: []
+      filter-sql:
+        shortDescription: The filter sql to be applied to the data, if filter or id is provided, this field will be ignored
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause, empty for no filter.
+        uiOrder: 4
+        type: string
+        required: []
+        title: Filter SQL
+    required:
+      - index-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Delete operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_CREATE_INDEX:
+  shortDescription: Create an index in Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+      mappings:
+        description: >-
+          Index mappings which starts with {"mappings": {"properties"}} field, please refer to [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/dense-vector.html)
+          for vector search and [here](https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-types.html) for other mappings.
+        type: object
+        uiOrder: 1
+        title: Mappings
+        required: []
+    required:
+      - index-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Create index operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_DELETE_INDEX:
+  shortDescription: Delete an index in Elasticsearch
+  input:
+    uiOrder: 0
+    properties:
+      index-name:
+        description: Name of the Elasticsearch index.
+        type: string
+        uiOrder: 0
+        title: Index Name
+    required:
+      - index-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Delete index operation status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object

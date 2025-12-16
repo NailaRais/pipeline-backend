@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [List GitHub Repo Issues](https://instill.tech/instill-ai/pipelines/github-demo/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -34,11 +32,11 @@ variable:
   repository-name:
     title: Repository Name
     description: Name of the repository i.e. instill-core
-    instill-format: string
+    type: string
   repository-owner:
     title: Repository Owner
     description: Name of the repository owner i.e. instill-ai
-    instill-format: string
+    type: string
 output:
   result:
     title: Result

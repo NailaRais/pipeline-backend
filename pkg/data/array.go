@@ -2,6 +2,7 @@ package data
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -13,6 +14,10 @@ type Array []format.Value
 
 func (Array) IsValue() {}
 
+var arrayGetters = map[string]func(Array) (format.Value, error){
+	"length": func(a Array) (format.Value, error) { return a.Length(), nil },
+}
+
 func (a Array) Get(p *path.Path) (v format.Value, err error) {
 	if p == nil || p.IsEmpty() {
 		return a, nil
@@ -22,12 +27,19 @@ func (a Array) Get(p *path.Path) (v format.Value, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if firstSeg.SegmentType == path.IndexSegment {
+	switch firstSeg.SegmentType {
+	case path.IndexSegment:
 		index := firstSeg.Index
 		if index >= len(a) {
 			return nil, fmt.Errorf("path not found: %s", p)
 		}
 		return a[index].Get(remainingPath)
+	case path.AttributeSegment:
+		getter, exists := arrayGetters[firstSeg.Attribute]
+		if !exists {
+			return nil, fmt.Errorf("path not found: %s", p)
+		}
+		return getter(a)
 	}
 	return nil, fmt.Errorf("path not found: %s", p)
 }
@@ -63,4 +75,45 @@ func (a Array) Equal(other format.Value) bool {
 		return true
 	}
 	return false
+}
+
+func (a Array) Length() format.Number {
+	return NewNumberFromInteger(len(a))
+}
+
+func (a Array) String() string {
+	segments := make([]string, 0, len(a))
+	for _, v := range a {
+		switch v := v.(type) {
+		case *stringData:
+			segments = append(segments, fmt.Sprintf("\"%s\"", v.String()))
+		default:
+			segments = append(segments, v.String())
+		}
+	}
+	return fmt.Sprintf("[%s]", strings.Join(segments, ", "))
+}
+
+func (a Array) ToJSONValue() (v any, err error) {
+	jsonArr := make([]any, len(a))
+	for i, v := range a {
+		jsonArr[i], err = v.ToJSONValue()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return jsonArr, nil
+}
+
+// Copy creates a deep copy of the Array to prevent concurrent access issues.
+// This is essential when passing array data across goroutine boundaries.
+func (a Array) Copy() Array {
+	if a == nil {
+		return nil
+	}
+	copied := make(Array, len(a))
+	for i, v := range a {
+		copied[i] = copyValue(v)
+	}
+	return copied
 }

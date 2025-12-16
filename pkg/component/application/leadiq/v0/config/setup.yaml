@@ -1,0 +1,12 @@
+additionalProperties: false
+properties:
+  api-key:
+    description: Fill in your LeadIQ Secret Base64 API key, you can find it in [API Key](https://account.leadiq.com/app/settings/api-keys).
+    type: string
+    instillSecret: true
+    uiOrder: 0
+    title: API Key
+required:
+  - api-key
+title: LeadIQ Connection
+type: object

@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [Resume Screening](https://instill.tech/instill-ai/pipelines/structured-resume-screening/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -83,11 +81,11 @@ variable:
   job-description:
     title: job description
     description: The text of the job description.
-    instill-format: string
+    type: string
   resume:
     title: resume
     description: The PDF file of the candidates resume
-    instill-format: "*/*"
+    type: document
 output:
   output:
     title: output

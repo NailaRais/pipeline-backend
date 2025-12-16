@@ -3,16 +3,11 @@ package github
 import (
 	"context"
 
-	"fmt"
-
 	"github.com/google/go-github/v62/github"
-	"google.golang.org/protobuf/types/known/structpb"
-
-	"github.com/instill-ai/pipeline-backend/pkg/component/base"
-	"github.com/instill-ai/x/errmsg"
 )
 
-type PullRequestService interface {
+// PullRequestsService is the interface for the GitHub pull request service.
+type PullRequestsService interface {
 	List(context.Context, string, string, *github.PullRequestListOptions) ([]*github.PullRequest, *github.Response, error)
 	Get(context.Context, string, string, int) (*github.PullRequest, *github.Response, error)
 	ListComments(context.Context, string, string, int, *github.PullRequestListCommentsOptions) ([]*github.PullRequestComment, *github.Response, error)
@@ -20,23 +15,56 @@ type PullRequestService interface {
 	ListCommits(context.Context, string, string, int, *github.ListOptions) ([]*github.RepositoryCommit, *github.Response, error)
 }
 
+// PullRequest is the GitHub pull request object.
 type PullRequest struct {
-	ID                int64    `json:"id"`
-	Number            int      `json:"number"`
-	State             string   `json:"state"`
-	Title             string   `json:"title"`
-	Body              string   `json:"body"`
-	DiffURL           string   `json:"diff-url,omitempty"`
-	CommitsURL        string   `json:"commits-url,omitempty"`
-	Commits           []Commit `json:"commits"`
-	Head              string   `json:"head"`
-	Base              string   `json:"base"`
-	CommentsNum       int      `json:"comments-num"`
-	CommitsNum        int      `json:"commits-num"`
-	ReviewCommentsNum int      `json:"review-comments-num"`
+	ID                int64    `instill:"id"`
+	Number            int      `instill:"number"`
+	State             string   `instill:"state"`
+	Title             string   `instill:"title"`
+	Body              string   `instill:"body"`
+	DiffURL           string   `instill:"diff-url"`
+	CommitsURL        string   `instill:"commits-url"`
+	Commits           []Commit `instill:"commits"`
+	Head              string   `instill:"head"`
+	Base              string   `instill:"base"`
+	CommentsNum       int      `instill:"comments-num"`
+	CommitsNum        int      `instill:"commits-num"`
+	ReviewCommentsNum int      `instill:"review-comments-num"`
 }
 
-func (githubClient *Client) extractPullRequestInformation(ctx context.Context, owner string, repository string, originalPr *github.PullRequest, needCommitDetails bool) (PullRequest, error) {
+type PullRequestComment struct {
+	ID                  *int64            `instill:"id"`
+	NodeID              *string           `instill:"node-id"`
+	InReplyTo           *int64            `instill:"in-reply-to-id"`
+	Body                *string           `instill:"body"`
+	Path                *string           `instill:"path"`
+	DiffHunk            *string           `instill:"diff-hunk"`
+	PullRequestReviewID *int64            `instill:"pull-request-review-id"`
+	Position            *int              `instill:"position"`
+	OriginalPosition    *int              `instill:"original-position"`
+	StartLine           *int              `instill:"start-line"`
+	Line                *int              `instill:"line"`
+	OriginalLine        *int              `instill:"original-line"`
+	OriginalStartLine   *int              `instill:"original-start-line"`
+	Side                *string           `instill:"side"`
+	StartSide           *string           `instill:"start-side"`
+	CommitID            *string           `instill:"commit-id"`
+	OriginalCommitID    *string           `instill:"original-commit-id"`
+	User                *User             `instill:"user"`
+	Reactions           *Reactions        `instill:"reactions"`
+	CreatedAt           *github.Timestamp `instill:"created-at"`
+	UpdatedAt           *github.Timestamp `instill:"updated-at"`
+	// AuthorAssociation is the comment author's relationship to the pull request's repository.
+	// Possible values are "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR", "MEMBER", "OWNER", or "NONE".
+	AuthorAssociation *string `instill:"author-association"`
+	URL               *string `instill:"url"`
+	HTMLURL           *string `instill:"html-url"`
+	PullRequestURL    *string `instill:"pull-request-url"`
+	// Can be one of: LINE, FILE from https://docs.github.com/rest/pulls/comments#create-a-review-comment-for-a-pull-request
+	SubjectType *string `instill:"subject-type"`
+}
+
+func (client *Client) extractPullRequestInformation(ctx context.Context, owner string, repository string, originalPr *github.PullRequest, needCommitDetails bool) (PullRequest, error) {
 	resp := PullRequest{
 		ID:                originalPr.GetID(),
 		Number:            originalPr.GetNumber(),
@@ -51,142 +79,17 @@ func (githubClient *Client) extractPullRequestInformation(ctx context.Context, o
 		ReviewCommentsNum: originalPr.GetReviewComments(),
 	}
 	if originalPr.GetCommitsURL() != "" {
-		commits, _, err := githubClient.PullRequests.ListCommits(ctx, owner, repository, resp.Number, nil)
+		commits, _, err := client.PullRequests.ListCommits(ctx, owner, repository, resp.Number, nil)
 		if err != nil {
 			return PullRequest{}, addErrMsgToClientError(err)
 		}
 		resp.Commits = make([]Commit, len(commits))
 		for idx, commit := range commits {
-			resp.Commits[idx] = githubClient.extractCommitInformation(ctx, owner, repository, commit, needCommitDetails)
+			resp.Commits[idx], err = client.extractCommitInformation(ctx, owner, repository, commit, needCommitDetails)
+			if err != nil {
+				return PullRequest{}, err
+			}
 		}
 	}
 	return resp, nil
-}
-
-type ListPullRequestsInput struct {
-	RepoInfo
-	State     string `json:"state"`
-	Sort      string `json:"sort"`
-	Direction string `json:"direction"`
-	PageOptions
-}
-type ListPullRequestsResp struct {
-	PullRequests []PullRequest `json:"pull-requests"`
-}
-
-func (githubClient *Client) listPullRequestsTask(ctx context.Context, props *structpb.Struct) (*structpb.Struct, error) {
-
-	var inputStruct ListPullRequestsInput
-	err := base.ConvertFromStructpb(props, &inputStruct)
-	if err != nil {
-		return nil, err
-	}
-	owner, repository, err := parseTargetRepo(inputStruct)
-	if err != nil {
-		return nil, err
-	}
-
-	opts := &github.PullRequestListOptions{
-		State:     inputStruct.State,
-		Sort:      inputStruct.Sort,
-		Direction: inputStruct.Direction,
-		ListOptions: github.ListOptions{
-			Page:    inputStruct.Page,
-			PerPage: min(inputStruct.PerPage, 100), // GitHub API only allows 100 per page
-		},
-	}
-	prs, _, err := githubClient.PullRequests.List(ctx, owner, repository, opts)
-	if err != nil {
-		return nil, addErrMsgToClientError(err)
-	}
-	PullRequests := make([]PullRequest, len(prs))
-	for idx, pr := range prs {
-		PullRequests[idx], err = githubClient.extractPullRequestInformation(ctx, owner, repository, pr, false)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	var prResp ListPullRequestsResp
-	prResp.PullRequests = PullRequests
-	out, err := base.ConvertToStructpb(prResp)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-type GetPullRequestInput struct {
-	RepoInfo
-	PrNumber float64 `json:"pr-number"`
-}
-type GetPullRequestResp struct {
-	PullRequest
-}
-
-func (githubClient *Client) getPullRequestTask(ctx context.Context, props *structpb.Struct) (*structpb.Struct, error) {
-
-	var inputStruct GetPullRequestInput
-	err := base.ConvertFromStructpb(props, &inputStruct)
-	if err != nil {
-		return nil, err
-	}
-	owner, repository, err := parseTargetRepo(inputStruct)
-	if err != nil {
-		return nil, err
-	}
-	number := inputStruct.PrNumber
-	var pullRequest *github.PullRequest
-	if number > 0 {
-		pr, _, err := githubClient.PullRequests.Get(ctx, owner, repository, int(number))
-		if err != nil {
-			// err includes the rate limit, 404 not found, etc.
-			// if the connection is not authorized, it's easy to get rate limit error in large scale usage.
-			return nil, addErrMsgToClientError(err)
-		}
-		pullRequest = pr
-	} else {
-		// Get the latest PR
-		opts := &github.PullRequestListOptions{
-			State:     "all",
-			Sort:      "created",
-			Direction: "desc",
-			ListOptions: github.ListOptions{
-				Page:    1,
-				PerPage: 1,
-			},
-		}
-		prs, _, err := githubClient.PullRequests.List(ctx, owner, repository, opts)
-		if err != nil {
-			// err includes the rate limit.
-			// if the connection is not authorized, it's easy to get rate limit error in large scale usage.
-			return nil, addErrMsgToClientError(err)
-		}
-		if len(prs) == 0 {
-			return nil, errmsg.AddMessage(
-				fmt.Errorf("no pull request found"),
-				"No pull request found",
-			)
-		}
-		pullRequest = prs[0]
-		// Some fields are not included in the list API, so we need to get the PR again.
-		pr, _, err := githubClient.PullRequests.Get(ctx, owner, repository, *pullRequest.Number)
-		if err != nil {
-			// err includes the rate limit, 404 not found, etc.
-			// if the connection is not authorized, it's easy to get rate limit error in large scale usage.
-			return nil, addErrMsgToClientError(err)
-		}
-		pullRequest = pr
-	}
-
-	var prResp GetPullRequestResp
-	prResp.PullRequest, err = githubClient.extractPullRequestInformation(ctx, owner, repository, pullRequest, true)
-	if err != nil {
-		return nil, err
-	}
-	out, err := base.ConvertToStructpb(prResp)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }

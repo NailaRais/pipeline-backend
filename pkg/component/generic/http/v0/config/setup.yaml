@@ -1,0 +1,107 @@
+additionalProperties: false
+properties:
+  authentication:
+    description: Authentication method to use for the REST API.
+    uiOrder: 0
+    oneOf:
+      - properties:
+          auth-type:
+            const: NO_AUTH
+            description: No Authentication.
+            uiOrder: 0
+            order: 0
+            title: Auth Type
+            type: string
+        required:
+          - auth-type
+        title: No Auth
+      - properties:
+          auth-type:
+            const: BASIC_AUTH
+            description: Basic auth.
+            uiOrder: 0
+            order: 0
+            title: Auth Type
+            type: string
+          password:
+            description: Password for Basic auth.
+            type: string
+            instillSecret: true
+            uiOrder: 2
+            order: 2
+            title: Password
+          username:
+            description: Username for Basic Auth.
+            type: string
+            uiOrder: 1
+            order: 1
+            title: Username
+        required:
+          - auth-type
+          - username
+          - password
+        title: Basic Auth
+      - properties:
+          auth-location:
+            default: header
+            description: Add the API key to the header or query params.
+            enum:
+              - header
+              - query
+            type: string
+            uiOrder: 3
+            order: 3
+            title: Auth Location
+          auth-type:
+            const: API_KEY
+            description: API key authentication.
+            uiOrder: 0
+            order: 0
+            title: Auth Type
+            type: string
+          key:
+            default: X-API-Key
+            description: Key name for API key authentication.
+            type: string
+            uiOrder: 1
+            order: 1
+            title: Key Name
+          value:
+            description: Key value for API key authentication.
+            type: string
+            instillSecret: true
+            uiOrder: 2
+            order: 2
+            title: Key Value
+        required:
+          - auth-type
+          - key
+          - value
+          - auth-location
+        title: API Key
+      - properties:
+          auth-type:
+            const: BEARER_TOKEN
+            description: Bearer token authentication.
+            uiOrder: 0
+            order: 0
+            title: Auth Type
+            type: string
+          token:
+            description: Bearer token.
+            type: string
+            instillSecret: true
+            uiOrder: 1
+            order: 1
+            title: Token
+        required:
+          - auth-type
+          - token
+        title: Bearer Token
+    order: 1
+    title: Authentication
+    type: object
+required:
+  - authentication
+title: REST API Connection
+type: object

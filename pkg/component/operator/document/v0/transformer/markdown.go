@@ -5,48 +5,74 @@ import (
 	"strings"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
+	"go.uber.org/zap"
 )
 
-type ConvertDocumentToMarkdownTransformerInput struct {
-	Document            string `json:"document"`
-	DisplayImageTag     bool   `json:"display-image-tag"`
-	Filename            string `json:"filename"`
-	DisplayAllPageImage bool   `json:"display-all-page-image"`
+// ConvertDocumentToMarkdownInput ...
+type ConvertDocumentToMarkdownInput struct {
+	Document            string
+	DisplayImageTag     bool
+	Filename            string
+	DisplayAllPageImage bool
+	Resolution          int
+	// Converter selects the conversion engine for the transformation. For the
+	// moment, it only applies to PDF-to-Markdown conversion. The allowed
+	// values are:
+	// - "pdfplumber"
+	// - "docling"
+	// Any other value will default to "pdfplumber" for backwards
+	// compatibility.
+	Converter string
 }
 
-type ConvertDocumentToMarkdownTransformerOutput struct {
-	Body          string   `json:"body"`
-	Filename      string   `json:"filename"`
-	Images        []string `json:"images,omitempty"`
-	Error         string   `json:"error,omitempty"`
-	AllPageImages []string `json:"all-page-images,omitempty"`
-	Markdowns     []string `json:"markdowns"`
+// ConvertDocumentToMarkdownOutput ...
+type ConvertDocumentToMarkdownOutput struct {
+	Body          string
+	Filename      string
+	Images        []string
+	Error         string
+	AllPageImages []string
+	Markdowns     []string
 }
 
-func ConvertDocumentToMarkdown(inputStruct *ConvertDocumentToMarkdownTransformerInput, transformerGetter MarkdownTransformerGetterFunc) (*ConvertDocumentToMarkdownTransformerOutput, error) {
-	contentType, err := util.GetContentTypeFromBase64(inputStruct.Document)
+// DocumentToMarkdownConverter transforms documents to Markdown.
+type DocumentToMarkdownConverter struct {
+	logger *zap.Logger
+}
+
+// NewDocumentToMarkdownConverter initializes a DocumentToMarkdownConverter.
+func NewDocumentToMarkdownConverter(l *zap.Logger) *DocumentToMarkdownConverter {
+	if l == nil {
+		l = zap.NewNop()
+	}
+
+	return &DocumentToMarkdownConverter{logger: l}
+}
+
+// Convert transforms a document to Markdown format. In PDF-to-Markdown
+// conversion, the converter can be selected (between Docling and pdfplumber).
+// For the moment, the rest of extensions don't allow for such selection.
+func (c *DocumentToMarkdownConverter) Convert(in *ConvertDocumentToMarkdownInput) (*ConvertDocumentToMarkdownOutput, error) {
+	contentType, err := util.GetContentTypeFromBase64(in.Document)
 	if err != nil {
 		return nil, err
 	}
 
 	fileExtension := util.TransformContentTypeToFileExtension(contentType)
-
 	if fileExtension == "" {
 		return nil, fmt.Errorf("unsupported file type")
 	}
 
-	var transformer MarkdownTransformer
-
-	transformer, err = transformerGetter(fileExtension, inputStruct)
+	transformer, err := c.getMarkdownTransformer(fileExtension, in)
 	if err != nil {
 		return nil, err
 	}
-	converterOutput, err := transformer.Transform()
+	converterOutput, err := transformer.transform()
 	if err != nil {
 		return nil, err
 	}
 
-	outputStruct := &ConvertDocumentToMarkdownTransformerOutput{
+	out := &ConvertDocumentToMarkdownOutput{
 		Body:          converterOutput.Body,
 		Images:        converterOutput.Images,
 		Error:         strings.Join(converterOutput.ParsingError, "\n"),
@@ -54,65 +80,53 @@ func ConvertDocumentToMarkdown(inputStruct *ConvertDocumentToMarkdownTransformer
 		Markdowns:     converterOutput.Markdowns,
 	}
 
-	if inputStruct.Filename != "" {
-		filename := strings.Split(inputStruct.Filename, ".")[0] + ".md"
-		outputStruct.Filename = filename
+	if in.Filename != "" {
+		filename := strings.Split(in.Filename, ".")[0] + ".md"
+		out.Filename = filename
 	}
-	return outputStruct, nil
+
+	return out, nil
 }
 
-func GetMarkdownTransformer(fileExtension string, inputStruct *ConvertDocumentToMarkdownTransformerInput) (MarkdownTransformer, error) {
+func (c *DocumentToMarkdownConverter) getMarkdownTransformer(fileExtension string, inputStruct *ConvertDocumentToMarkdownInput) (markdownTransformer, error) {
+	switch fileExtension {
+	case "html":
+		return &htmlToMarkdownTransformer{base64EncodedText: inputStruct.Document}, nil
+	case "xlsx":
+		return &xlsxToMarkdownTransformer{base64EncodedText: inputStruct.Document}, nil
+	case "xls":
+		return &xlsToMarkdownTransformer{base64EncodedText: inputStruct.Document}, nil
+	case "csv":
+		return &csvToMarkdownTransformer{base64EncodedText: inputStruct.Document}, nil
+	}
+
+	pdfToMarkdownStruct := pdfToMarkdownInputStruct{
+		displayImageTag:     inputStruct.DisplayImageTag,
+		displayAllPageImage: inputStruct.DisplayAllPageImage,
+		resolution:          inputStruct.Resolution,
+	}
+	pdfTransformer := &pdfToMarkdownTransformer{
+		fileExtension:       fileExtension,
+		engine:              inputStruct.Converter,
+		pdfToMarkdownStruct: pdfToMarkdownStruct,
+		logger:              c.logger,
+	}
+
 	switch fileExtension {
 	case "pdf":
-		return PDFToMarkdownTransformer{
-			Base64EncodedText:   inputStruct.Document,
-			FileExtension:       fileExtension,
-			DisplayImageTag:     inputStruct.DisplayImageTag,
-			DisplayAllPageImage: inputStruct.DisplayAllPageImage,
-			PDFConvertFunc:      getPDFConvertFunc("pdfplumber"),
-		}, nil
+		pdfTransformer.pdfToMarkdownStruct.base64Text = inputStruct.Document
+		return pdfTransformer, nil
 	case "doc", "docx":
-		return DocxDocToMarkdownTransformer{
-			Base64EncodedText:   inputStruct.Document,
-			FileExtension:       fileExtension,
-			DisplayImageTag:     inputStruct.DisplayImageTag,
-			DisplayAllPageImage: inputStruct.DisplayAllPageImage,
-			PDFConvertFunc:      getPDFConvertFunc("pdfplumber"),
+		return &docToMarkdownTransformer{
+			pdfToMarkdownTransformer: pdfTransformer,
+			base64EncodedText:        inputStruct.Document,
 		}, nil
 	case "ppt", "pptx":
-		return PptPptxToMarkdownTransformer{
-			Base64EncodedText:   inputStruct.Document,
-			FileExtension:       fileExtension,
-			DisplayImageTag:     inputStruct.DisplayImageTag,
-			DisplayAllPageImage: inputStruct.DisplayAllPageImage,
-			PDFConvertFunc:      getPDFConvertFunc("pdfplumber"),
-		}, nil
-	case "html":
-		return HTMLToMarkdownTransformer{
-			Base64EncodedText: inputStruct.Document,
-			FileExtension:     fileExtension,
-		}, nil
-	case "xlsx":
-		return XlsxToMarkdownTransformer{
-			Base64EncodedText: inputStruct.Document,
-		}, nil
-	case "xls":
-		return XlsToMarkdownTransformer{
-			Base64EncodedText: inputStruct.Document,
-		}, nil
-	case "csv":
-		return CSVToMarkdownTransformer{
-			Base64EncodedText: inputStruct.Document,
+		return &pptToMarkdownTransformer{
+			pdfToMarkdownTransformer: pdfTransformer,
+			base64EncodedText:        inputStruct.Document,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported file type")
-	}
-}
-
-// We could provide more converters in the future. For now, we only have one.
-func getPDFConvertFunc(converter string) func(string, bool, bool) (converterOutput, error) {
-	switch converter {
-	default:
-		return convertPDFToMarkdownWithPDFPlumber
 	}
 }

@@ -2,7 +2,7 @@
 title: "Slack"
 lang: "en-US"
 draft: false
-description: "Learn about how to set up a VDP Slack component https://github.com/instill-ai/instill-core"
+description: "Learn about how to set up a Slack component https://github.com/instill-ai/instill-core"
 ---
 
 The Slack component is an application component that allows users to get and send message on Slack.
@@ -10,19 +10,13 @@ It can carry out the following tasks:
 - [Read Message](#read-message)
 - [Send Message](#send-message)
 
-
-
 ## Release Stage
 
 `Alpha`
 
-
-
 ## Configuration
 
-The component definition and tasks are defined in the [definition.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/slack/v0/config/definition.json) and [tasks.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/slack/v0/config/tasks.json) files respectively.
-
-
+The component definition and tasks are defined in the [definition.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/slack/v0/config/definition.yaml) and [tasks.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/slack/v0/config/tasks.yaml) files respectively.
 
 
 ## Setup
@@ -31,7 +25,7 @@ The component definition and tasks are defined in the [definition.json](https://
 In order to communicate with Slack, the following connection details need to be
 provided. You may specify them directly in a pipeline recipe as key-value pairs
 within the component's `setup` block, or you can create a **Connection** from
-the [**Integration Settings**](https://www.instill.tech/docs/vdp/integration)
+the [**Integration Settings**](https://docs.instill-ai.com/docs/set-up-component)
 page and reference the whole `setup` as `setup:
 ${connection.<my-connection-id>}`.
 
@@ -39,9 +33,8 @@ ${connection.<my-connection-id>}`.
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Bot OAuth Token (required) | `bot-token` | string | Token associated to the application bot  |
-| User OAuth Token | `user-token` | string | Token to act on behalf of a Slack user  |
-
+| Bot OAuth Token (required) | `bot-token` | string | Token associated to the application bot. |
+| User OAuth Token | `user-token` | string | Token to act on behalf of a Slack user. |
 </div>
 
 ### Connecting through a Slack App
@@ -56,7 +49,7 @@ App](https://api.slack.com/docs/apps). In order to read / write messages from / 
 
 The Slack integration on **Instill Cloud** uses OAuth 2.0 to connect with Slack
 via the `instill-ai` app. There, [creating a
-connection](https://www.instill.tech/docs/vdp/integration#creating-a-connection)
+connection](https://docs.instill-ai.com/docs/set-up-component#creating-a-connection)
 will simply require authenticating on Slack. Your newly created connection,
 which you can reference in your pipelines, will allow you to read messages and
 send them on behalf of your user or the `instill-ai` bot on the channels where
@@ -65,8 +58,7 @@ that app is installed.
 If you want to connect with Slack via OAuth 2.0 on **Instill Core**, you will
 need to provide your app's **client ID** and **client secret** [as environment
 variables on Instill
-Core](https://github.com/instill-ai/instill-core/blob/main/.env).
-
+Core](https://github.com/instill-ai/instill-core/blob/main/.env.secrets.component).
 
 
 ## Supported Tasks
@@ -77,24 +69,23 @@ Get the latest message since specific date
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_READ_MESSAGE` |
-| Channel Name (required) | `channel-name` | string | Channel name, as displayed on Slack |
-| Start to Read Date | `start-to-read-date` | string | Date (in `YYYY-MM-DD` format) from which messages will start to be fetched |
+| Channel Name (required) | `channel-name` | string | Channel name, as displayed on Slack. |
+| Start to Read Date | `start-to-read-date` | string | Date (in `YYYY-MM-DD` format) from which messages will start to be fetched. If not provided, it will be 7 days before the current date. The date will be in the UTC timezone. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| [Conversations](#read-message-conversations) | `conversations` | array[object] | An array of conversations with thread messages |
+| [Conversations](#read-message-conversations) | `conversations` | array[object] | An array of conversations with thread messages. |
+
 </div>
+
 
 <details>
 <summary> Output Objects in Read Message</summary>
@@ -105,12 +96,13 @@ Get the latest message since specific date
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Last Date | `last-date` | string | Date of the last message |
-| Start Conversation Message | `message` | string | message to start a conversation |
-| Start Date | `start-date` | string | when a conversation starts |
-| [Replied messages](#read-message-replied-messages) | `thread-reply-messages` | array | replies in a conversation |
-| User UID | `user-id` | string | unique id from Slack |
-| User Name | `user-name` | string | user name in Slack |
+| Last Date | `last-date` | string | Date of the last message. |
+| Start Conversation Message | `message` | string | message to start a conversation. |
+| Start Date | `start-date` | string | when a conversation starts. |
+| [Replied messages](#read-message-replied-messages) | `thread-reply-messages` | array | replies in a conversation. |
+| User UID | `user-id` | string | unique id from Slack. |
+| User Name | `user-name` | string | user name in Slack. |
+
 </div>
 
 <h4 id="read-message-replied-messages">Replied Messages</h4>
@@ -119,12 +111,14 @@ Get the latest message since specific date
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Replied Time | `datetime` | string | replied datetime |
-| Replied Message | `message` | string | message to reply a conversation |
-| User UID | `user-id` | string | unique id from Slack |
-| User Name | `user-name` | string | user name in Slack |
+| Replied Time | `datetime` | string | replied datetime. |
+| Replied Message | `message` | string | message to reply a conversation. |
+| User UID | `user-id` | string | unique id from Slack. |
+| User Name | `user-name` | string | user name in Slack. |
+
 </div>
 </details>
+
 
 ### Send Message
 
@@ -132,24 +126,123 @@ send message to a specific channel
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_WRITE_MESSAGE` |
-| Channel Name (required) | `channel-name` | string | Channel name, as displayed on Slack |
-| Message (required) | `message` | string | The message to be sent to the target channel |
-| Send As User | `as-user` | boolean | Send the message on behalf of the user identified by the <code>setup.user-token</code> field |
+| Channel Name (required) | `channel-name` | string | Channel name, as displayed on Slack. |
+| Message (required) | `message` | string | The message to be sent to the target channel. |
+| Send As User | `as-user` | boolean | Send the message on behalf of the user identified by the <code>setup.user-token</code> field. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Result | `result` | string | Result of the message delivery |
+| Result | `result` | string | Result of the message delivery. |
+
+</div>
+## Supported Events
+
+### New Message Event
+
+A new message event from Slack.
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Configuration | ID | Type | Description |
+| :--- | :--- | :--- | :--- |
+| Channel Names (required) | `channel-names` | array[string] | Names of the Slack channels to listen to. |
 </div>
 
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
+| Event Message | ID | Type | Description |
+| :--- | :--- | :--- | :--- |
+| Timestamp | `timestamp` | string | Timestamp of the message. |
+| [Channel](#new-message-channel) | `channel` | object | Channel information. |
+| [User](#new-message-user) | `user` | object | User information. |
+| Message Text | `text` | string | Content of the message. |
+</div>
+
+<details>
+<summary>Event Message Objects</summary>
+
+<h4 id="new-message-channel">Channel</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Channel ID | `id` | string | Unique ID of the Slack channel. |
+| Channel Name | `name` | string | Name of the Slack channel. |
+</div>
+
+<h4 id="new-message-user">User</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| User ID | `id` | string | Unique ID of the Slack user. |
+| User Name | `name` | string | Username of the Slack user. |
+| Real Name | `real-name` | string | Real name of the Slack user. |
+| [Profile](#new-message-user-profile) | `profile` | object | User profile information. |
+</div>
+
+<h4 id="new-message-user-profile">Profile</h4>
+
+<div class="markdown-col-no-wrap" data-col-1 data-col-2>
+
+| Field | Field ID | Type | Note |
+| :--- | :--- | :--- | :--- |
+| Display Name | `display-name` | string | Display name of the Slack user. |
+</div>
+</details>
+
+## Example Recipes
+
+**Send a message to Slack when a new message is posted in a channel**
+
+```yaml
+version: v1beta
+
+on:
+  slack-0:
+    type: slack
+    event: EVENT_NEW_MESSAGE
+    config:
+      channel-names:
+        - channel-to-be-listened
+    setup: ${connection.my-slack-connection}
+
+variable:
+  message:
+    title: message
+    type: string
+    listen:
+      - ${on.slack-0.message.text}
+  user:
+    title: user
+    type: string
+    listen:
+      - ${on.slack-0.message.user.name}
+  channel:
+    title: channel
+    type: string
+    listen:
+      - ${on.slack-0.message.channel.name}
+
+component:
+  slack-0:
+    type: slack
+    input:
+      channel-name: channel-for-notification
+      message: Message received in #${variable.channel} from @${variable.user}: ${variable.message}
+      as-user: false
+    condition:
+    setup: ${connection.my-slack-connection}
+    task: TASK_WRITE_MESSAGE
+
+```

@@ -12,28 +12,31 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util/httpclient"
-	"github.com/instill-ai/x/errmsg"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
-type Client struct {
-	*httpclient.Client
+const apiBaseURL = "https://api.atlassian.com"
+
+type client struct {
+	*resty.Client
 	APIBaseURL string `json:"api-base-url"`
 	Domain     string `json:"domain"`
 	CloudID    string `json:"cloud-id"`
 }
 
-type CloudID struct {
+type cloudID struct {
 	ID string `json:"cloudId"`
 }
 
-type AuthConfig struct {
+type authConfig struct {
 	Email   string `json:"email"`
 	Token   string `json:"token"`
 	BaseURL string `json:"base-url"`
 }
 
-func newClient(_ context.Context, setup *structpb.Struct, logger *zap.Logger) (*Client, error) {
-	var authConfig AuthConfig
+func newClient(_ context.Context, setup *structpb.Struct, logger *zap.Logger) (*client, error) {
+	var authConfig authConfig
 	if err := base.ConvertFromStructpb(setup, &authConfig); err != nil {
 		return nil, err
 	}
@@ -42,13 +45,13 @@ func newClient(_ context.Context, setup *structpb.Struct, logger *zap.Logger) (*
 	token := authConfig.Token
 	baseURL := authConfig.BaseURL
 	if token == "" {
-		return nil, errmsg.AddMessage(
+		return nil, errorsx.AddMessage(
 			fmt.Errorf("token not provided"),
 			"token not provided",
 		)
 	}
 	if email == "" {
-		return nil, errmsg.AddMessage(
+		return nil, errorsx.AddMessage(
 			fmt.Errorf("email not provided"),
 			"email not provided",
 		)
@@ -58,28 +61,24 @@ func newClient(_ context.Context, setup *structpb.Struct, logger *zap.Logger) (*
 		return nil, err
 	}
 
-	jiraClient := httpclient.New(
-		"Jira-Client",
-		baseURL,
-		httpclient.WithLogger(logger),
-		httpclient.WithEndUserError(new(errBody)),
-	)
-	jiraClient.
-		SetHeader("Accept", "application/json").
-		SetHeader("Content-Type", "application/json").
-		SetBasicAuth(email, token)
-	client := &Client{
-		Client:     jiraClient,
+	return &client{
+		Client: httpclient.New(
+			"Jira-Client",
+			baseURL,
+			httpclient.WithLogger(logger),
+			httpclient.WithEndUserError(new(errBody)),
+		).SetHeader("Accept", "application/json").
+			SetHeader("Content-Type", "application/json").
+			SetBasicAuth(email, token),
 		APIBaseURL: apiBaseURL,
 		Domain:     baseURL,
 		CloudID:    cloudID,
-	}
-	return client, nil
+	}, nil
 }
 
 func getCloudID(baseURL string) (string, error) {
 	client := httpclient.New("Get-Domain-ID", baseURL, httpclient.WithEndUserError(new(errBody)))
-	resp := CloudID{}
+	resp := cloudID{}
 	req := client.R().SetResult(&resp)
 	// See https://developer.atlassian.com/cloud/jira/software/rest/intro/#base-url-differences
 	if _, err := req.Get("_edge/tenant_info"); err != nil {

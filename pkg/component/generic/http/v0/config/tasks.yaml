@@ -1,0 +1,152 @@
+$defs:
+  inputWithBody:
+    uiOrder: 0
+    properties:
+      body:
+        description: The request body.
+        type: '*'
+        shortDescription: The request body
+        uiOrder: 1
+        order: 1
+        required: []
+        title: Body
+      endpoint-url:
+        title: Endpoint URL
+        description: |-
+          The API endpoint URL. It must be a valid URI reference and point to
+          an external IP address. If the URL resolves to an internal or private
+          IP, the component will throw an error.
+        type: string
+        uiOrder: 0
+      output-body-schema:
+        description: The JSON schema of output body.
+        type: string
+        shortDescription: The JSON schema of output body
+        uiOrder: 2
+        order: 2
+        required: []
+        title: Body
+      header:
+        description: |-
+          The HTTP header of the response. It must be an object whose values
+          are arrays of strings.
+        uiOrder: 3
+        order: 3
+        required: []
+        title: Header
+        type: json
+        example:
+          Instill-Header-One:
+            - foo
+          Instill-Header-Two:
+            - bar
+    required:
+      - endpoint-url
+    title: Input
+    type: object
+  inputWithoutBody:
+    uiOrder: 0
+    properties:
+      endpoint-url:
+        title: Endpoint URL
+        description: |-
+          The API endpoint URL. It must be a valid URI reference and point to
+          an external IP address. If the URL resolves to an internal or private
+          IP, the component will throw an error.
+        type: string
+        uiOrder: 0
+      output-body-schema:
+        description: The request body.
+        type: string
+        shortDescription: The request body
+        uiOrder: 1
+        order: 1
+        required: []
+        title: Body
+      header:
+        description: |-
+          The HTTP header of the response. It must be an object whose values
+          are arrays of strings.
+        uiOrder: 2
+        order: 2
+        required: []
+        title: Header
+        type: json
+        example:
+          Instill-Header-One:
+            - foo
+          Instill-Header-Two:
+            - bar
+    required:
+      - endpoint-url
+    title: Input Without Body
+    type: object
+  output:
+    description: The HTTP response from the API.
+    uiOrder: 0
+    properties:
+      body:
+        description: The body of the response.
+        uiOrder: 1
+        required: []
+        title: Body
+        type: '*'
+      header:
+        description: The HTTP header of the response.
+        uiOrder: 2
+        required: []
+        title: Header
+        type: json
+      status-code:
+        description: The HTTP status code of the response.
+        uiOrder: 0
+        title: Status Code
+        type: integer
+    required:
+      - status-code
+      - body
+      - header
+    title: Output
+    type: object
+TASK_DELETE:
+  shortDescription: Send a HTTP DELETE request.
+  input:
+    $ref: '#/$defs/inputWithBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_GET:
+  shortDescription: Send a HTTP GET request.
+  input:
+    $ref: '#/$defs/inputWithoutBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_HEAD:
+  shortDescription: Send a HTTP HEAD request.
+  input:
+    $ref: '#/$defs/inputWithoutBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_OPTIONS:
+  shortDescription: Send a HTTP OPTIONS request.
+  input:
+    $ref: '#/$defs/inputWithBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_PATCH:
+  shortDescription: Send a HTTP PATCH request.
+  input:
+    $ref: '#/$defs/inputWithBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_POST:
+  shortDescription: Send a HTTP POST request.
+  input:
+    $ref: '#/$defs/inputWithBody'
+  output:
+    $ref: '#/$defs/output'
+TASK_PUT:
+  shortDescription: Send a HTTP PUT request.
+  input:
+    $ref: '#/$defs/inputWithBody'
+  output:
+    $ref: '#/$defs/output'

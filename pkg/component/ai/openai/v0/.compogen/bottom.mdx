@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [PicassoAI: Cubist Creations at Your Command!](https://instill.tech/instill-ai/pipelines/picasso-ai/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -56,24 +54,22 @@ variable:
   colour:
     title: Colour
     description: Describe the main colour to use i.e. blue, random
-    instill-format: string
+    type: string
     instill-ui-order: 1
   period:
     title: Period
     description: |
       Input different Picasso periods i.e. Blue, Rose, African, Synthetic Cubism, etc.
-    instill-format: string
+    type: string
   prompt:
     title: Prompt
     description: Input prompt here i.e. "A cute baby wombat"
-    instill-format: string
+    type: string
 output:
   image:
     title: Image
     value: ${openai-0.output.results}
 ```
-
-Recipe for the [Explain this topic to me in another language](https://instill.tech/instill-ai/pipelines/gpt-4o-mini-demo/playground) pipeline.
 
 ```yaml
 version: v1beta
@@ -98,11 +94,11 @@ variable:
   language:
     title: Language
     description: Input a language i.e. Chinese, Japanese, French, etc.
-    instill-format: string
+    type: string
   prompt:
     title: Prompt
     description: Write the topic you want to ask about here i.e. "Tell me about small LLMs"
-    instill-format: string
+    type: string
 output:
   result:
     title: Result

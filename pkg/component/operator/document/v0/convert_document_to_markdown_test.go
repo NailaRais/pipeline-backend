@@ -2,9 +2,6 @@ package document
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
-	"os"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -17,15 +14,21 @@ import (
 
 func TestConvertDocumentToMarkdown(t *testing.T) {
 	c := qt.New(t)
+	c.Parallel()
 
 	tests := []struct {
-		name     string
-		filepath string
-		expected ConvertDocumentToMarkdownOutput
+		name                string
+		filepath            string
+		converter           string
+		expected            ConvertDocumentToMarkdownOutput
+		requiresLibreOffice bool
+		skipIfMissingDeps   bool
 	}{
 		{
-			name:     "Convert PDF file",
-			filepath: "testdata/test.pdf",
+			name:              "Convert PDF file - pdfplumber",
+			filepath:          "testdata/test.pdf",
+			converter:         "pdfplumber",
+			skipIfMissingDeps: true, // Skip if Python dependencies missing
 			expected: ConvertDocumentToMarkdownOutput{
 				Body:          "# This is test file for markdown\n",
 				Images:        []format.Image{},
@@ -34,8 +37,34 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 			},
 		},
 		{
-			name:     "Convert DOCX file",
-			filepath: "testdata/test.docx",
+			name:              "Convert PDF file - Docling",
+			filepath:          "testdata/test.pdf",
+			converter:         "docling",
+			skipIfMissingDeps: true, // Skip if Python dependencies missing
+			expected: ConvertDocumentToMarkdownOutput{
+				Body:          "This is test file for markdown",
+				Images:        []format.Image{},
+				AllPageImages: []format.Image{},
+				Markdowns:     []string{"This is test file for markdown"},
+			},
+		},
+		{
+			name:                "Convert DOCX file",
+			filepath:            "testdata/test.docx",
+			requiresLibreOffice: true,
+			skipIfMissingDeps:   true,
+			expected: ConvertDocumentToMarkdownOutput{
+				Body:          "# This is test file for markdown\n",
+				Images:        []format.Image{},
+				AllPageImages: []format.Image{},
+				Markdowns:     []string{"# This is test file for markdown\n"},
+			},
+		},
+		{
+			name:                "Convert DOC file",
+			filepath:            "testdata/test.doc",
+			requiresLibreOffice: true,
+			skipIfMissingDeps:   true,
 			expected: ConvertDocumentToMarkdownOutput{
 				Body:          "# This is test file for markdown\n",
 				Images:        []format.Image{},
@@ -53,8 +82,22 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 			},
 		},
 		{
-			name:     "Convert PPTX file",
-			filepath: "testdata/test.pptx",
+			name:                "Convert PPTX file",
+			filepath:            "testdata/test.pptx",
+			requiresLibreOffice: true,
+			skipIfMissingDeps:   true,
+			expected: ConvertDocumentToMarkdownOutput{
+				Body:          "# This           is     test          file       for markdown\n",
+				Images:        []format.Image{},
+				AllPageImages: []format.Image{},
+				Markdowns:     []string{"# This           is     test          file       for markdown\n"},
+			},
+		},
+		{
+			name:                "Convert PPT file",
+			filepath:            "testdata/test.ppt",
+			requiresLibreOffice: true,
+			skipIfMissingDeps:   true,
 			expected: ConvertDocumentToMarkdownOutput{
 				Body:          "# This           is     test          file       for markdown\n",
 				Images:        []format.Image{},
@@ -91,12 +134,25 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 		},
 	}
 
-	bc := base.Component{}
-	ctx := context.Background()
-
 	for _, test := range tests {
 		c.Run(test.name, func(c *qt.C) {
-			component := Init(bc)
+			// LibreOffice operations are now serialized with a mutex, so parallel execution is safe
+			c.Parallel()
+
+			// Skip tests that require external dependencies if they're not available
+			if test.skipIfMissingDeps {
+				if test.requiresLibreOffice && !checkExternalDependency("libreoffice") {
+					c.Skip("LibreOffice not found, skipping test")
+					return
+				}
+				if !checkExternalDependency("python3") && !checkExternalDependency("python") {
+					c.Skip("Python not found, skipping test")
+					return
+				}
+			}
+
+			ctx := context.Background()
+			component := Init(base.Component{})
 			c.Assert(component, qt.IsNotNil)
 
 			execution, err := component.CreateExecution(base.ComponentExecution{
@@ -106,10 +162,9 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			c.Assert(execution, qt.IsNotNil)
 
-			fileContent, err := os.ReadFile(test.filepath)
+			// Use cached file content for better performance
+			fileContent, err := getTestFileContent(test.filepath)
 			c.Assert(err, qt.IsNil)
-
-			base64DataURI := fmt.Sprintf("data:%s;base64,%s", mimeTypeByExtension(test.filepath), base64.StdEncoding.EncodeToString(fileContent))
 
 			ir, ow, eh, job := mock.GenerateMockJob(c)
 			ir.ReadDataMock.Set(func(ctx context.Context, input any) error {
@@ -117,13 +172,14 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 				case *ConvertDocumentToMarkdownInput:
 					*input = ConvertDocumentToMarkdownInput{
 						Document: func() format.Document {
-							doc, err := data.NewDocumentFromURL(base64DataURI)
+							doc, err := data.NewDocumentFromBytes(fileContent, mimeTypeByExtension(test.filepath), "")
 							if err != nil {
 								return nil
 							}
 							return doc
 						}(),
 						DisplayImageTag: false,
+						Converter:       test.converter,
 					}
 				}
 				return nil
@@ -149,10 +205,14 @@ func mimeTypeByExtension(filepath string) string {
 		return "application/pdf"
 	case "testdata/test.docx":
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "testdata/test.doc":
+		return "application/msword"
 	case "testdata/test.html":
 		return "text/html"
 	case "testdata/test.pptx":
 		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "testdata/test.ppt":
+		return "application/vnd.ms-powerpoint"
 	case "testdata/test.xlsx":
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	case "testdata/test.xls":

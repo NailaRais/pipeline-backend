@@ -14,8 +14,16 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/redis/go-redis/v9"
 
-	componentstore "github.com/instill-ai/pipeline-backend/pkg/component/store"
-	miniox "github.com/instill-ai/x/minio"
+	"github.com/instill-ai/x/client"
+	"github.com/instill-ai/x/minio"
+	"github.com/instill-ai/x/temporal"
+)
+
+const (
+	EditionLocalCE      = "docker-ce:dev"
+	EditionCloudDev     = "cloud:dev"
+	EditionCloudStaging = "cloud:staging"
+	EditionCloudProd    = "cloud"
 )
 
 // Config - Global variable to export
@@ -27,25 +35,26 @@ type AppConfig struct {
 	Component       ComponentConfig       `koanf:"component"`
 	Database        DatabaseConfig        `koanf:"database"`
 	InfluxDB        InfluxDBConfig        `koanf:"influxdb"`
-	Temporal        TemporalConfig        `koanf:"temporal"`
+	Temporal        temporal.ClientConfig `koanf:"temporal"`
 	Cache           CacheConfig           `koanf:"cache"`
-	Log             LogConfig             `koanf:"log"`
-	MgmtBackend     MgmtBackendConfig     `koanf:"mgmtbackend"`
-	ModelBackend    ModelBackendConfig    `koanf:"modelbackend"`
+	OTELCollector   OTELCollectorConfig   `koanf:"otelcollector"`
+	MgmtBackend     client.ServiceConfig  `koanf:"mgmtbackend"`
+	ModelBackend    client.ServiceConfig  `koanf:"modelbackend"`
 	OpenFGA         OpenFGAConfig         `koanf:"openfga"`
-	InstillCloud    InstillCloudConfig    `koanf:"instillcloud"`
-	ArtifactBackend ArtifactBackendConfig `koanf:"artifactbackend"`
-	Minio           miniox.Config         `koanf:"minio"`
-	AppBackend      AppBackendConfig      `koanf:"appbackend"`
+	ArtifactBackend client.ServiceConfig  `koanf:"artifactbackend"`
+	Minio           minio.Config          `koanf:"minio"`
+	AgentBackend    client.ServiceConfig  `koanf:"agentbackend"`
+	APIGateway      APIGatewayConfig      `koanf:"apigateway"`
 }
 
-// InstillCloud config
-type InstillCloudConfig struct {
-	Host string `koanf:"host"`
-	Port int    `koanf:"port"`
+// APIGatewayConfig related to API gateway
+type APIGatewayConfig struct {
+	Host       string `koanf:"host"`
+	PublicPort int    `koanf:"publicport"`
+	TLSEnabled bool   `koanf:"tlsenabled"`
 }
 
-// OpenFGA config
+// OpenFGAConfig related to OpenFGA
 type OpenFGAConfig struct {
 	Host    string `koanf:"host"`
 	Port    int    `koanf:"port"`
@@ -71,16 +80,14 @@ type ServerConfig struct {
 		Host       string `koanf:"host"`
 		Port       int    `koanf:"port"`
 	}
-	Debug       bool `koanf:"debug"`
-	MaxDataSize int  `koanf:"maxdatasize"`
-	Workflow    struct {
+	Debug    bool `koanf:"debug"`
+	Workflow struct {
 		MaxWorkflowTimeout int32 `koanf:"maxworkflowtimeout"`
 		MaxWorkflowRetry   int32 `koanf:"maxworkflowretry"`
 		MaxActivityRetry   int32 `koanf:"maxactivityretry"`
 	}
-	InstanceID         string `koanf:"instanceid"`
-	DataChanBufferSize int    `koanf:"datachanbuffersize"`
-	InstillCoreHost    string `koanf:"instillcorehost"`
+	InstanceID      string `koanf:"instanceid"`
+	InstillCoreHost string `koanf:"instillcorehost"`
 }
 
 // ComponentConfig contains the configuration of different components. Global
@@ -88,8 +95,16 @@ type ServerConfig struct {
 // default API key when no setup is specified, or to connect with a 3rd party
 // vendor via OAuth.
 type ComponentConfig struct {
-	Secrets componentstore.ComponentSecrets
+	Secrets                     ComponentSecrets
+	InternalUserEmails          []string
+	ComponentsWithInternalUsers []string
 }
+
+// ComponentSecrets contains the global config secrets of each
+// implemented component (referenced by ID). Components may use these secrets
+// to skip the component configuration step and have a ready-to-run
+// config.
+type ComponentSecrets map[string]map[string]any
 
 // DatabaseConfig related to database
 type DatabaseConfig struct {
@@ -105,7 +120,6 @@ type DatabaseConfig struct {
 		ReplicationTimeFrame int    `koanf:"replicationtimeframe"` // in seconds
 	} `koanf:"replica"`
 	Name     string `koanf:"name"`
-	Version  uint   `koanf:"version"`
 	TimeZone string `koanf:"timezone"`
 	Pool     struct {
 		IdleConnections int           `koanf:"idleconnections"`
@@ -136,17 +150,6 @@ type LogConfig struct {
 	}
 }
 
-// TemporalConfig related to Temporal
-type TemporalConfig struct {
-	HostPort   string `koanf:"hostport"`
-	Namespace  string `koanf:"namespace"`
-	Retention  string `koanf:"retention"`
-	Ca         string `koanf:"ca"`
-	Cert       string `koanf:"cert"`
-	Key        string `koanf:"key"`
-	ServerName string `koanf:"servername"`
-}
-
 // CacheConfig related to Redis
 type CacheConfig struct {
 	Redis struct {
@@ -154,43 +157,11 @@ type CacheConfig struct {
 	}
 }
 
-// MgmtBackendConfig related to mgmt-backend
-type MgmtBackendConfig struct {
-	Host        string `koanf:"host"`
-	PublicPort  int    `koanf:"publicport"`
-	PrivatePort int    `koanf:"privateport"`
-	HTTPS       struct {
-		Cert string `koanf:"cert"`
-		Key  string `koanf:"key"`
-	}
-}
-
-// ModelBackendConfig related to mgmt-backend
-type ModelBackendConfig struct {
-	Host       string `koanf:"host"`
-	PublicPort int    `koanf:"publicport"`
-	HTTPS      struct {
-		Cert string `koanf:"cert"`
-		Key  string `koanf:"key"`
-	}
-}
-
-type ArtifactBackendConfig struct {
-	Host       string `koanf:"host"`
-	PublicPort int    `koanf:"publicport"`
-	HTTPS      struct {
-		Cert string `koanf:"cert"`
-		Key  string `koanf:"key"`
-	}
-}
-
-type AppBackendConfig struct {
-	Host       string `koanf:"host"`
-	PublicPort int    `koanf:"publicport"`
-	HTTPS      struct {
-		Cert string `koanf:"cert"`
-		Key  string `koanf:"key"`
-	}
+// OTELCollectorConfig related to OpenTelemetry collector
+type OTELCollectorConfig struct {
+	Enable bool   `koanf:"enable"`
+	Host   string `koanf:"host"`
+	Port   int    `koanf:"port"`
 }
 
 // Init - Assign global config to decoded config struct
@@ -210,7 +181,7 @@ func Init(filePath string) error {
 	}
 
 	if err := k.Load(env.ProviderWithValue("CFG_", ".", func(s string, v string) (string, interface{}) {
-		key := strings.Replace(strings.ToLower(strings.TrimPrefix(s, "CFG_")), "_", ".", -1)
+		key := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, "CFG_")), "_", ".")
 		if strings.Contains(v, ",") {
 			return key, strings.Split(strings.TrimSpace(v), ",")
 		}

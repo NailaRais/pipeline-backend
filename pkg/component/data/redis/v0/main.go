@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
+	"github.com/instill-ai/pipeline-backend/pkg/component/resources/schemas"
 )
 
 const (
@@ -20,12 +21,12 @@ const (
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/setup.json
-	setupJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/setup.yaml
+	setupYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -42,7 +43,10 @@ type execution struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		additionalJSONBytes := map[string][]byte{
+			"schema.yaml": schemas.SchemaYAML,
+		}
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, additionalJSONBytes)
 		if err != nil {
 			panic(err)
 		}

@@ -12,6 +12,7 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/mock"
 	"github.com/instill-ai/pipeline-backend/pkg/data"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 )
 
 func TestSegment(t *testing.T) {
@@ -67,13 +68,15 @@ func TestSegment(t *testing.T) {
 			jsonValue, err := data.NewJSONValue(segmentsMap)
 			c.Assert(err, qt.IsNil)
 
-			c.Assert(data.Unmarshal(jsonValue, &segmentsStruct), qt.IsNil)
+			binaryFetcher := external.NewBinaryFetcher()
+			unmarshaler := data.NewUnmarshaler(binaryFetcher)
+			c.Assert(unmarshaler.Unmarshal(context.Background(), jsonValue, &segmentsStruct), qt.IsNil)
 			segments := segmentsStruct.Segments
 
 			ir.ReadDataMock.Set(func(ctx context.Context, input any) error {
 				switch input := input.(type) {
 				case *segmentInput:
-					audio, err := data.NewAudioFromBytes(audioData, "audio/wav", "input.wav")
+					audio, err := data.NewAudioFromBytes(audioData, data.WAV, "input.wav", true)
 					c.Assert(err, qt.IsNil)
 					*input = segmentInput{
 						Audio:    audio,
@@ -107,7 +110,7 @@ func TestSegment(t *testing.T) {
 
 				for i, segment := range capturedOutput.AudioSegments {
 					c.Assert(segment, qt.Not(qt.IsNil), qt.Commentf("Segment %d is nil", i))
-					c.Assert(segment.ContentType().String(), qt.Equals, "audio/ogg", qt.Commentf("Segment %d has incorrect MIME type", i))
+					c.Assert(segment.ContentType().String(), qt.Equals, data.OGG, qt.Commentf("Segment %d has incorrect MIME type", i))
 				}
 			}
 		})

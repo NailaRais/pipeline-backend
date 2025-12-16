@@ -12,12 +12,12 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
 
-	artifactPB "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
 )
 
 const maxPayloadSize int = 1024 * 1024 * 32
 
-func initArtifactClient(serverURL string) (pbClient artifactPB.ArtifactPublicServiceClient, connection Connection, err error) {
+func initArtifactClient(serverURL string) (pbClient artifactpb.ArtifactPublicServiceClient, connection Connection, err error) {
 	var clientDialOpts grpc.DialOption
 
 	if strings.HasPrefix(serverURL, "https://") {
@@ -32,7 +32,7 @@ func initArtifactClient(serverURL string) (pbClient artifactPB.ArtifactPublicSer
 		return nil, nil, fmt.Errorf("failed to create client connection: %w", err)
 	}
 
-	return artifactPB.NewArtifactPublicServiceClient(clientConn), clientConn, nil
+	return artifactpb.NewArtifactPublicServiceClient(clientConn), clientConn, nil
 }
 
 func getArtifactServerURL(vars map[string]any) string {
@@ -48,6 +48,11 @@ func getRequestMetadata(vars map[string]any) metadata.MD {
 		"Instill-User-Uid", util.GetInstillUserUID(vars),
 		"Instill-Auth-Type", "user",
 	)
+
+	originalHeader := util.GetOriginalHeader(vars)
+	for k, v := range originalHeader {
+		md.Set(k, v.(string))
+	}
 
 	if requester := util.GetInstillRequesterUID(vars); requester != "" {
 		md.Set("Instill-Requester-Uid", requester)

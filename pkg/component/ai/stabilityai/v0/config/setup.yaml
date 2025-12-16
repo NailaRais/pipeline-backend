@@ -1,0 +1,12 @@
+additionalProperties: false
+properties:
+  api-key:
+    description: Fill in your Stability AI API key. To find your keys, visit <a href="https://platform.stability.ai/account/keys">here</a>.
+    type: string
+    instillSecret: true
+    instillCredential: true
+    uiOrder: 0
+    title: API Key
+required: []
+title: Stability AI Connection
+type: object

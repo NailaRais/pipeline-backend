@@ -16,24 +16,20 @@ type Number interface {
 	Value
 	Integer() int
 	Float64() float64
-	String() string
 }
 
 type String interface {
 	Value
-	String() string
 }
 
 type Boolean interface {
 	Value
 	Boolean() bool
-	String() string
 }
 
 type ByteArray interface {
 	Value
 	ByteArray() []byte
-	String() string
 }
 
 type File interface {
@@ -44,15 +40,13 @@ type File interface {
 	Base64() (url String, err error)
 	FileSize() (size Number)
 	ContentType() (t String)
-	FileName() (t String)
+	Filename() (t String)
 	SourceURL() (t String)
-	String() string
 }
 
 type Document interface {
 	File
 
-	String() string
 	Text() (val String, err error)
 	PDF() (val Document, err error)
 }
@@ -62,6 +56,7 @@ type Image interface {
 	Width() Number
 	Height() Number
 	Convert(contentType string) (val Image, err error)
+	Resize(width, height int) (val Image, err error)
 }
 
 type Video interface {

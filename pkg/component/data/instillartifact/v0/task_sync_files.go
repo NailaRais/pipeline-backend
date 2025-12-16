@@ -12,13 +12,13 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
 
-	artifactPB "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
 )
 
 const (
 	googleDrive = "googleDrive"
 
-	//The keys below are the single source of truth for the external metadata from catalog.
+	//The keys below are the single source of truth for the external metadata from knowledge base.
 	// We use these keys to judge the uploading and overwriting files.
 	idKey           = "id"
 	modifiedTimeKey = "modified-time"
@@ -53,59 +53,57 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 		return nil, fmt.Errorf("convert input to struct: %w", err)
 	}
 
-	artifactClient, connection := e.client, e.connection
-
-	defer connection.Close()
+	artifactClient := e.client
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	ctx = metadata.NewOutgoingContext(ctx, getRequestMetadata(e.SystemVariables))
 
-	catalogs, err := artifactClient.ListCatalogs(ctx, &artifactPB.ListCatalogsRequest{
+	knowledgeBases, err := artifactClient.ListKnowledgeBases(ctx, &artifactpb.ListKnowledgeBasesRequest{
 		NamespaceId: inputStruct.Namespace,
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("list catalogs: %w", err)
+		return nil, fmt.Errorf("list knowledge bases: %w", err)
 	}
 
 	found := false
-	for _, catalog := range catalogs.Catalogs {
-		if catalog.Name == inputStruct.CatalogID {
+	for _, kb := range knowledgeBases.KnowledgeBases {
+		if kb.Id == inputStruct.KnowledgeBaseID {
 			found = true
 			break
 		}
 	}
 
 	if !found {
-		_, err = artifactClient.CreateCatalog(ctx, &artifactPB.CreateCatalogRequest{
+		_, err = artifactClient.CreateKnowledgeBase(ctx, &artifactpb.CreateKnowledgeBaseRequest{
 			NamespaceId: inputStruct.Namespace,
-			Name:        inputStruct.CatalogID,
+			Id:          inputStruct.KnowledgeBaseID,
 		})
 
 		if err != nil {
-			return nil, fmt.Errorf("create catalog: %w", err)
+			return nil, fmt.Errorf("create knowledge base: %w", err)
 		}
 	}
 
-	var catalogFiles []*artifactPB.File
+	var files []*artifactpb.File
 	var nextToken string
 
 	syncSource := getSource(inputStruct.ThirdPartyFiles[0].WebViewLink)
 
 	for {
-		filesRes, err := artifactClient.ListCatalogFiles(ctx, &artifactPB.ListCatalogFilesRequest{
-			NamespaceId: inputStruct.Namespace,
-			CatalogId:   inputStruct.CatalogID,
-			PageToken:   nextToken,
+		filesRes, err := artifactClient.ListFiles(ctx, &artifactpb.ListFilesRequest{
+			NamespaceId:     inputStruct.Namespace,
+			KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+			PageToken:       &nextToken,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("list catalog files: %w", err)
+			return nil, fmt.Errorf("list files: %w", err)
 		}
 		for _, file := range filesRes.Files {
 			if getSourceFromExternalMetadata(file) == syncSource {
-				catalogFiles = append(catalogFiles, file)
+				files = append(files, file)
 			}
 		}
 		if filesRes.NextPageToken == "" {
@@ -114,11 +112,11 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 		nextToken = filesRes.NextPageToken
 	}
 
-	catalogFilesMap := map[string]*artifactPB.File{}
+	filesMap := map[string]*artifactpb.File{}
 
-	for _, catalogFile := range catalogFiles {
-		externalUID := getIDFromExternalMetadata(catalogFile)
-		catalogFilesMap[externalUID] = catalogFile
+	for _, file := range files {
+		externalUID := getIDFromExternalMetadata(file)
+		filesMap[externalUID] = file
 	}
 
 	thirdPartyFilesMap := map[string]ThirdPartyFile{}
@@ -128,17 +126,17 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 	}
 
 	// Delete Files when
-	// 1. File is not in the third-party-files but in the catalog
-	// 2. File is in the third-party-files and in the catalog, but the third-party modified-time is newer than the catalog's third-party's modified-time
-	toBeDeleteFileUIDs := []string{}
+	// 1. File is not in the third-party-files but in the knowledge base
+	// 2. File is in the third-party-files and in the knowledge base, but the third-party modified-time is newer than the knowledge base's third-party's modified-time
+	toBeDeleteFileIDs := []string{}
 	toBeUpdateFiles := []ThirdPartyFile{}
 
 	// Delete file and update file section
-	for catalogFileUID, catalogFile := range catalogFilesMap {
-		thirdPartyFile, ok := thirdPartyFilesMap[catalogFileUID]
+	for fileUID, file := range filesMap {
+		thirdPartyFile, ok := thirdPartyFilesMap[fileUID]
 
 		if !ok {
-			toBeDeleteFileUIDs = append(toBeDeleteFileUIDs, catalogFile.FileUid)
+			toBeDeleteFileIDs = append(toBeDeleteFileIDs, file.Uid)
 			continue
 		}
 
@@ -148,15 +146,15 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 			return nil, fmt.Errorf("parse modified time in sync file: %w", err)
 		}
 
-		catalogFileModifiedTime, err := getModifiedTimeFromExternalMetadata(catalogFile)
+		fileModifiedTime, err := getModifiedTimeFromExternalMetadata(file)
 
 		if err != nil {
-			return nil, fmt.Errorf("parse modified time in catalog file: %w", err)
+			return nil, fmt.Errorf("parse modified time in file: %w", err)
 		}
 
 		// It means overwrite the file here.
-		if thirdPartyModifiedTime.After(catalogFileModifiedTime) {
-			toBeDeleteFileUIDs = append(toBeDeleteFileUIDs, catalogFile.FileUid)
+		if thirdPartyModifiedTime.After(fileModifiedTime) {
+			toBeDeleteFileIDs = append(toBeDeleteFileIDs, file.Uid)
 			toBeUpdateFiles = append(toBeUpdateFiles, thirdPartyFile)
 		}
 	}
@@ -164,18 +162,20 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 	// New file section
 	toBeUploadFiles := []ThirdPartyFile{}
 	for syncFileUID, syncFile := range thirdPartyFilesMap {
-		_, ok := catalogFilesMap[syncFileUID]
+		_, ok := filesMap[syncFileUID]
 		if !ok {
 			toBeUploadFiles = append(toBeUploadFiles, syncFile)
 		}
 	}
 
-	for _, fileUID := range toBeDeleteFileUIDs {
-		_, err = artifactClient.DeleteCatalogFile(ctx, &artifactPB.DeleteCatalogFileRequest{
-			FileUid: fileUID,
+	for _, fileID := range toBeDeleteFileIDs {
+		_, err = artifactClient.DeleteFile(ctx, &artifactpb.DeleteFileRequest{
+			NamespaceId:     inputStruct.Namespace,
+			KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+			FileId:          fileID,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("delete catalog file uid %s: %w", fileUID, err)
+			return nil, fmt.Errorf("delete file uid %s: %w", fileID, err)
 		}
 	}
 
@@ -186,7 +186,6 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 		ErrorMessages: []string{},
 	}
 
-	toBeProcessFileUIDs := []string{}
 	for _, syncFile := range toBeUploadFiles {
 
 		uploadingFile, err := buildUploadingFile(syncFile)
@@ -197,28 +196,30 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 			continue
 		}
 
-		uploadRes, err := artifactClient.UploadCatalogFile(ctx, &artifactPB.UploadCatalogFileRequest{
-			NamespaceId: inputStruct.Namespace,
-			CatalogId:   inputStruct.CatalogID,
-			File:        uploadingFile,
+		createRes, err := artifactClient.CreateFile(ctx, &artifactpb.CreateFileRequest{
+			NamespaceId:     inputStruct.Namespace,
+			KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+			File: &artifactpb.File{
+				Filename:         uploadingFile.Filename,
+				Content:          uploadingFile.Content,
+				ExternalMetadata: uploadingFile.ExternalMetadata,
+			},
 		})
 
 		if err != nil {
 			outputStruct.FailureFiles = append(outputStruct.FailureFiles, syncFile)
-			outputStruct.ErrorMessages = append(outputStruct.ErrorMessages, fmt.Sprintf("upload file: %v", err))
+			outputStruct.ErrorMessages = append(outputStruct.ErrorMessages, fmt.Sprintf("create file: %v", err))
 			continue
 		}
 
-		toBeProcessFileUIDs = append(toBeProcessFileUIDs, uploadRes.File.FileUid)
-
 		outputStruct.UploadedFiles = append(outputStruct.UploadedFiles, FileOutput{
-			FileUID:    uploadRes.File.FileUid,
-			FileName:   uploadRes.File.Name,
-			FileType:   uploadRes.File.Type.String(),
-			CreateTime: util.FormatToISO8601(uploadRes.File.CreateTime),
-			UpdateTime: util.FormatToISO8601(uploadRes.File.UpdateTime),
-			Size:       uploadRes.File.Size,
-			CatalogID:  inputStruct.CatalogID,
+			FileUID:         createRes.File.Uid,
+			FileName:        createRes.File.Filename,
+			FileType:        createRes.File.Type.String(),
+			CreateTime:      util.FormatToISO8601(createRes.File.CreateTime),
+			UpdateTime:      util.FormatToISO8601(createRes.File.UpdateTime),
+			Size:            createRes.File.Size,
+			KnowledgeBaseID: inputStruct.KnowledgeBaseID,
 		})
 	}
 
@@ -230,59 +231,56 @@ func (e *execution) syncFiles(input *structpb.Struct) (*structpb.Struct, error) 
 			continue
 		}
 
-		uploadRes, err := artifactClient.UploadCatalogFile(ctx, &artifactPB.UploadCatalogFileRequest{
-			NamespaceId: inputStruct.Namespace,
-			CatalogId:   inputStruct.CatalogID,
-			File:        uploadingFile,
+		createRes, err := artifactClient.CreateFile(ctx, &artifactpb.CreateFileRequest{
+			NamespaceId:     inputStruct.Namespace,
+			KnowledgeBaseId: inputStruct.KnowledgeBaseID,
+			File: &artifactpb.File{
+				Filename:         uploadingFile.Filename,
+				Content:          uploadingFile.Content,
+				ExternalMetadata: uploadingFile.ExternalMetadata,
+			},
 		})
 
 		if err != nil {
 			outputStruct.FailureFiles = append(outputStruct.FailureFiles, syncFile)
-			outputStruct.ErrorMessages = append(outputStruct.ErrorMessages, fmt.Sprintf("upload file: %v", err))
+			outputStruct.ErrorMessages = append(outputStruct.ErrorMessages, fmt.Sprintf("create file: %v", err))
 			continue
 		}
 
-		toBeProcessFileUIDs = append(toBeProcessFileUIDs, uploadRes.File.FileUid)
-
 		outputStruct.UpdatedFiles = append(outputStruct.UpdatedFiles, FileOutput{
-			FileUID:    uploadRes.File.FileUid,
-			FileName:   uploadRes.File.Name,
-			FileType:   uploadRes.File.Type.String(),
-			CreateTime: util.FormatToISO8601(uploadRes.File.CreateTime),
-			UpdateTime: util.FormatToISO8601(uploadRes.File.UpdateTime),
-			Size:       uploadRes.File.Size,
-			CatalogID:  inputStruct.CatalogID,
+			FileUID:         createRes.File.Uid,
+			FileName:        createRes.File.Filename,
+			FileType:        createRes.File.Type.String(),
+			CreateTime:      util.FormatToISO8601(createRes.File.CreateTime),
+			UpdateTime:      util.FormatToISO8601(createRes.File.UpdateTime),
+			Size:            createRes.File.Size,
+			KnowledgeBaseID: inputStruct.KnowledgeBaseID,
 		})
 	}
 
-	if len(toBeProcessFileUIDs) > 0 {
-		_, err = artifactClient.ProcessCatalogFiles(ctx, &artifactPB.ProcessCatalogFilesRequest{
-			FileUids: toBeProcessFileUIDs,
-		})
-
-		if err == nil {
-			outputStruct.Status = true
-		}
-	}
+	// Files now auto-process, no need for separate ProcessCatalogFiles call
+	outputStruct.Status = true
 
 	return base.ConvertToStructpb(outputStruct)
 }
 
-func buildUploadingFile(file ThirdPartyFile) (*artifactPB.File, error) {
+type uploadingFileData struct {
+	Filename         string
+	Content          string
+	ExternalMetadata *structpb.Struct
+}
 
-	fileType, err := util.GetFileType(file.Content, file.Name)
+func buildUploadingFile(file ThirdPartyFile) (*uploadingFileData, error) {
+
+	_, err := util.GetFileType(file.Content, file.Name)
 
 	if err != nil {
 		return nil, fmt.Errorf("get file type: %w", err)
 	}
 
-	typeString := "FILE_TYPE_" + strings.ToUpper(fileType)
-	typePB := artifactPB.FileType_value[typeString]
-
-	return &artifactPB.File{
-		Name:    file.Name,
-		Type:    artifactPB.FileType(typePB),
-		Content: file.Content,
+	return &uploadingFileData{
+		Filename: file.Name,
+		Content:  file.Content,
 		ExternalMetadata: &structpb.Struct{
 			Fields: map[string]*structpb.Value{
 				idKey:             stringValue(file.ID),
@@ -312,7 +310,7 @@ func getSource(link string) string {
 }
 
 // We will save the third-party metadata with aligning the data structure of third-party-files in tasks.json.
-func getSourceFromExternalMetadata(file *artifactPB.File) string {
+func getSourceFromExternalMetadata(file *artifactpb.File) string {
 	externalData := file.ExternalMetadata
 	if externalData == nil {
 		return ""
@@ -327,7 +325,7 @@ func getSourceFromExternalMetadata(file *artifactPB.File) string {
 	return getSource(link.GetStringValue())
 }
 
-func getModifiedTimeFromExternalMetadata(file *artifactPB.File) (time.Time, error) {
+func getModifiedTimeFromExternalMetadata(file *artifactpb.File) (time.Time, error) {
 	externalData := file.ExternalMetadata
 	if externalData == nil {
 		return time.Time{}, nil
@@ -342,7 +340,7 @@ func getModifiedTimeFromExternalMetadata(file *artifactPB.File) (time.Time, erro
 	return time.Parse(time.RFC3339, modifiedTime.GetStringValue())
 }
 
-func getIDFromExternalMetadata(file *artifactPB.File) string {
+func getIDFromExternalMetadata(file *artifactpb.File) string {
 	externalData := file.ExternalMetadata
 	if externalData == nil {
 		return ""

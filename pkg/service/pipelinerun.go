@@ -12,51 +12,56 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/guregu/null.v4"
 
-	"github.com/instill-ai/pipeline-backend/pkg/constant"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
 	"github.com/instill-ai/pipeline-backend/pkg/repository"
-	"github.com/instill-ai/pipeline-backend/pkg/resource"
+	"github.com/instill-ai/x/constant"
+	"github.com/instill-ai/x/minio"
+	"github.com/instill-ai/x/resource"
 
 	runpb "github.com/instill-ai/protogen-go/common/run/v1alpha"
 	mgmtpb "github.com/instill-ai/protogen-go/core/mgmt/v1beta"
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
-	resourcex "github.com/instill-ai/x/resource"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
 )
 
 const defaultPipelineReleaseID = "latest"
 
-func (s *service) logPipelineRunStart(ctx context.Context, pipelineTriggerID string, pipelineUID uuid.UUID, pipelineReleaseID string) *datamodel.PipelineRun {
+type logPipelineRunStartParams struct {
+	pipelineTriggerID string
+	pipelineUID       uuid.UUID
+	pipelineReleaseID string
+	requesterUID      uuid.UUID
+	userUID           uuid.UUID
+}
+
+func (s *service) logPipelineRunStart(ctx context.Context, params logPipelineRunStartParams) *datamodel.PipelineRun {
 	runSource := datamodel.RunSource(runpb.RunSource_RUN_SOURCE_API)
 	userAgentValue, ok := runpb.RunSource_value[resource.GetRequestSingleHeader(ctx, constant.HeaderUserAgentKey)]
 	if ok {
 		runSource = datamodel.RunSource(userAgentValue)
 	}
 
-	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
-
 	pipelineRun := &datamodel.PipelineRun{
-		PipelineTriggerUID: uuid.FromStringOrNil(pipelineTriggerID),
-		PipelineUID:        pipelineUID,
-		PipelineVersion:    pipelineReleaseID,
+		PipelineTriggerUID: uuid.FromStringOrNil(params.pipelineTriggerID),
+		PipelineUID:        params.pipelineUID,
+		PipelineVersion:    params.pipelineReleaseID,
 		Status:             datamodel.RunStatus(runpb.RunStatus_RUN_STATUS_PROCESSING),
 		Source:             runSource,
-		RequesterUID:       uuid.FromStringOrNil(requesterUID),
-		RunnerUID:          uuid.FromStringOrNil(userUID),
+		RequesterUID:       params.requesterUID,
+		RunnerUID:          params.userUID,
 		StartedTime:        time.Now(),
 	}
 
 	if err := s.repository.UpsertPipelineRun(ctx, pipelineRun); err != nil {
-		s.log.Error("failed to log pipeline run", zap.String("pipelineTriggerID", pipelineTriggerID), zap.Error(err))
+		s.log.Error("failed to log pipeline run", zap.String("pipelineTriggerID", params.pipelineTriggerID), zap.Error(err))
 	}
 	return pipelineRun
 }
 
-func (s *service) logPipelineRunError(ctx context.Context, pipelineTriggerID string, err error, startedTime time.Time) {
+func (s *service) logPipelineRunError(ctx context.Context, pipelineTriggerID string, err error) {
 	now := time.Now()
 	pipelineRunUpdates := &datamodel.PipelineRun{
 		Error:         null.StringFrom(err.Error()),
 		Status:        datamodel.RunStatus(runpb.RunStatus_RUN_STATUS_FAILED),
-		TotalDuration: null.IntFrom(now.Sub(startedTime).Milliseconds()),
 		CompletedTime: null.TimeFrom(now),
 	}
 
@@ -65,8 +70,8 @@ func (s *service) logPipelineRunError(ctx context.Context, pipelineTriggerID str
 	}
 }
 
-func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRunsRequest, filter filtering.Filter) (*pb.ListPipelineRunsResponse, error) {
-	ns, err := s.GetRscNamespace(ctx, req.GetNamespaceId())
+func (s *service) ListPipelineRuns(ctx context.Context, req *pipelinepb.ListPipelineRunsRequest, filter filtering.Filter) (*pipelinepb.ListPipelineRunsResponse, error) {
+	ns, err := s.GetNamespaceByID(ctx, req.GetNamespaceId())
 	if err != nil {
 		return nil, fmt.Errorf("invalid namespace: %w", err)
 	}
@@ -76,7 +81,7 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 		return nil, err
 	}
 
-	requesterUID, _ := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requesterUID, userUID := resource.GetRequesterUIDAndUserUID(ctx)
 	page := s.pageInRange(req.GetPage())
 	pageSize := s.pageSizeInRange(req.GetPageSize())
 
@@ -85,9 +90,9 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 		return nil, err
 	}
 
-	isOwner := dbPipeline.OwnerUID().String() == requesterUID
+	isOwner := dbPipeline.OwnerUID() == requesterUID
 
-	pipelineRuns, totalCount, err := s.repository.GetPaginatedPipelineRunsWithPermissions(ctx, requesterUID, dbPipeline.UID.String(),
+	pipelineRuns, totalCount, err := s.repository.GetPaginatedPipelineRunsWithPermissions(ctx, requesterUID.String(), dbPipeline.UID.String(),
 		page, pageSize, filter, orderBy, isOwner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pipeline runs: %w", err)
@@ -95,21 +100,22 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 
 	var referenceIDs []string
 	for _, pipelineRun := range pipelineRuns {
-		if CanViewPrivateData(pipelineRun.RequesterUID.String(), requesterUID) {
+		if canViewPrivateData(pipelineRun.RequesterUID, requesterUID) {
 			for _, input := range pipelineRun.Inputs {
 				referenceIDs = append(referenceIDs, input.Name)
 			}
 			for _, output := range pipelineRun.Outputs {
 				referenceIDs = append(referenceIDs, output.Name)
 			}
-			for _, reference := range pipelineRun.RecipeSnapshot {
-				referenceIDs = append(referenceIDs, reference.Name)
-			}
+		}
+		for _, reference := range pipelineRun.RecipeSnapshot {
+			referenceIDs = append(referenceIDs, reference.Name)
 		}
 	}
 
 	s.log.Info("start to get files from minio", zap.String("referenceIDs", strings.Join(referenceIDs, ",")))
-	fileContents, err := s.minioClient.GetFilesByPaths(ctx, s.log, referenceIDs)
+	fileContents, err := s.minioClient.WithLogger(s.log).
+		GetFilesByPaths(ctx, userUID, referenceIDs)
 	if err != nil {
 		s.log.Error("failed to get files from minio", zap.Error(err))
 	}
@@ -134,8 +140,8 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 		userIDMap[reqUID] = &runner.Id
 	}
 
-	// Convert datamodel.PipelineRun to pb.PipelineRun
-	pbPipelineRuns := make([]*pb.PipelineRun, len(pipelineRuns))
+	// Convert datamodel.PipelineRun to pipelinepb.PipelineRun
+	pbPipelineRuns := make([]*pipelinepb.PipelineRun, len(pipelineRuns))
 	for i, run := range pipelineRuns {
 		pbRun, err := s.convertPipelineRunToPB(run)
 		if err != nil {
@@ -146,7 +152,7 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 			pbRun.RequesterId = *requesterID
 		}
 
-		if CanViewPrivateData(run.RequesterUID.String(), requesterUID) {
+		if canViewPrivateData(run.RequesterUID, requesterUID) {
 			if len(run.Inputs) == 1 {
 				key := run.Inputs[0].Name
 				pbRun.Inputs, err = parseMetadataToStructArray(metadataMap, key)
@@ -165,20 +171,20 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 				}
 			}
 
-			if len(run.RecipeSnapshot) == 1 {
-				key := run.RecipeSnapshot[0].Name
-				pbRun.RecipeSnapshot, pbRun.DataSpecification, err = parseRecipeMetadata(ctx, metadataMap, s.converter, key)
-				if err != nil {
-					s.log.Error("Failed to load recipe snapshot", zap.Error(err), zap.String("pipelineUID", run.PipelineUID.String()),
-						zap.String("recipeReferenceID", key))
-				}
+		}
+		if len(run.RecipeSnapshot) == 1 {
+			key := run.RecipeSnapshot[0].Name
+			pbRun.RecipeSnapshot, pbRun.DataSpecification, err = parseRecipeMetadata(ctx, metadataMap, s.converter, key)
+			if err != nil {
+				s.log.Error("Failed to load recipe snapshot", zap.Error(err), zap.String("pipelineUID", run.PipelineUID.String()),
+					zap.String("recipeReferenceID", key))
 			}
 		}
 
 		pbPipelineRuns[i] = pbRun
 	}
 
-	return &pb.ListPipelineRunsResponse{
+	return &pipelinepb.ListPipelineRunsResponse{
 		PipelineRuns: pbPipelineRuns,
 		TotalSize:    int32(totalCount),
 		Page:         int32(page),
@@ -186,10 +192,10 @@ func (s *service) ListPipelineRuns(ctx context.Context, req *pb.ListPipelineRuns
 	}, nil
 }
 
-func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRunsRequest, filter filtering.Filter) (*pb.ListComponentRunsResponse, error) {
+func (s *service) ListComponentRuns(ctx context.Context, req *pipelinepb.ListComponentRunsRequest, filter filtering.Filter) (*pipelinepb.ListComponentRunsResponse, error) {
 	page := s.pageInRange(req.GetPage())
 	pageSize := s.pageSizeInRange(req.GetPageSize())
-	requesterUID, _ := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requesterUID, userUID := resource.GetRequesterUIDAndUserUID(ctx)
 
 	orderBy, err := ordering.ParseOrderBy(req)
 	if err != nil {
@@ -205,9 +211,9 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 		return nil, fmt.Errorf("failed to get pipeline by UID: %s. error: %s", dbPipelineRun.PipelineUID.String(), err.Error())
 	}
 
-	isOwner := dbPipeline.OwnerUID().String() == requesterUID
+	isOwner := dbPipeline.OwnerUID() == requesterUID
 
-	if !isOwner && requesterUID != dbPipelineRun.RequesterUID.String() {
+	if !isOwner && requesterUID != dbPipelineRun.RequesterUID {
 		return nil, fmt.Errorf("requester is not pipeline owner/credit owner. they are not allowed to view these component runs")
 	}
 
@@ -218,7 +224,7 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 
 	var referenceIDs []string
 	for _, pipelineRun := range componentRuns {
-		if CanViewPrivateData(dbPipelineRun.RequesterUID.String(), requesterUID) {
+		if canViewPrivateData(dbPipelineRun.RequesterUID, requesterUID) {
 			for _, input := range pipelineRun.Inputs {
 				referenceIDs = append(referenceIDs, input.Name)
 			}
@@ -229,7 +235,8 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 	}
 
 	s.log.Info("start to get files from minio", zap.String("referenceIDs", strings.Join(referenceIDs, ",")))
-	fileContents, err := s.minioClient.GetFilesByPaths(ctx, s.log, referenceIDs)
+	fileContents, err := s.minioClient.WithLogger(s.log).
+		GetFilesByPaths(ctx, userUID, referenceIDs)
 	if err != nil {
 		s.log.Error("failed to get files from minio", zap.Error(err))
 	}
@@ -239,15 +246,15 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 		metadataMap[content.Name] = content.Content
 	}
 
-	// Convert datamodel.ComponentRun to pb.ComponentRun
-	pbComponentRuns := make([]*pb.ComponentRun, len(componentRuns))
+	// Convert datamodel.ComponentRun to pipelinepb.ComponentRun
+	pbComponentRuns := make([]*pipelinepb.ComponentRun, len(componentRuns))
 	for i, run := range componentRuns {
 		pbRun, err := s.convertComponentRunToPB(run)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert component run: %w", err)
 		}
 
-		if CanViewPrivateData(dbPipelineRun.RequesterUID.String(), requesterUID) {
+		if canViewPrivateData(dbPipelineRun.RequesterUID, requesterUID) {
 			if len(run.Inputs) == 1 {
 				key := run.Inputs[0].Name
 				pbRun.Inputs, err = parseMetadataToStructArray(metadataMap, key)
@@ -269,7 +276,7 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 		pbComponentRuns[i] = pbRun
 	}
 
-	return &pb.ListComponentRunsResponse{
+	return &pipelinepb.ListComponentRunsResponse{
 		ComponentRuns: pbComponentRuns,
 		TotalSize:     int32(totalCount),
 		Page:          int32(page),
@@ -277,11 +284,11 @@ func (s *service) ListComponentRuns(ctx context.Context, req *pb.ListComponentRu
 	}, nil
 }
 
-func (s *service) ListPipelineRunsByRequester(ctx context.Context, req *pb.ListPipelineRunsByRequesterRequest) (*pb.ListPipelineRunsByRequesterResponse, error) {
+func (s *service) ListPipelineRunsByRequester(ctx context.Context, req *pipelinepb.ListPipelineRunsByRequesterRequest) (*pipelinepb.ListPipelineRunsByRequesterResponse, error) {
 	page := s.pageInRange(req.GetPage())
 	pageSize := s.pageSizeInRange(req.GetPageSize())
 
-	ns, err := s.GetRscNamespace(ctx, req.GetRequesterId())
+	ns, err := s.GetNamespaceByID(ctx, req.GetRequesterId())
 	if err != nil {
 		return nil, fmt.Errorf("invalid namespace: %w", err)
 	}
@@ -351,9 +358,9 @@ func (s *service) ListPipelineRunsByRequester(ctx context.Context, req *pb.ListP
 		userIDMap[requesterID] = &runner.Id
 	}
 
-	pbPipelineRuns := make([]*pb.PipelineRun, len(pipelineRuns))
+	pbPipelineRuns := make([]*pipelinepb.PipelineRun, len(pipelineRuns))
 
-	var pbRun *pb.PipelineRun
+	var pbRun *pipelinepb.PipelineRun
 	for i, run := range pipelineRuns {
 		pbRun, err = s.convertPipelineRunToPB(run)
 		if err != nil {
@@ -367,10 +374,60 @@ func (s *service) ListPipelineRunsByRequester(ctx context.Context, req *pb.ListP
 		pbPipelineRuns[i] = pbRun
 	}
 
-	return &pb.ListPipelineRunsByRequesterResponse{
+	return &pipelinepb.ListPipelineRunsByRequesterResponse{
 		PipelineRuns: pbPipelineRuns,
 		TotalSize:    int32(totalCount),
 		Page:         int32(page),
 		PageSize:     int32(pageSize),
 	}, nil
+}
+
+type uploadPipelineRunInputsToMinioParam struct {
+	pipelineTriggerID string
+	expiryRule        minio.ExpiryRule
+	pipelineData      []map[string]any
+}
+
+func (s *service) uploadPipelineRunInputsToMinio(ctx context.Context, param uploadPipelineRunInputsToMinioParam) error {
+	minioClient := s.minioClient
+	objectName := fmt.Sprintf("pipeline-runs/input/%s.json", param.pipelineTriggerID)
+
+	_, userUID := resource.GetRequesterUIDAndUserUID(ctx)
+	url, objectInfo, err := minioClient.WithLogger(s.log).
+		UploadFile(ctx, &minio.UploadFileParam{
+			UserUID:       userUID,
+			FilePath:      objectName,
+			FileContent:   param.pipelineData,
+			FileMimeType:  constant.ContentTypeJSON,
+			ExpiryRuleTag: param.expiryRule.Tag,
+		})
+	if err != nil {
+		return fmt.Errorf("upload pipeline run inputs to minio: %w", err)
+	}
+
+	inputs := datamodel.JSONB{{
+		Name: objectInfo.Key,
+		Type: objectInfo.ContentType,
+		Size: objectInfo.Size,
+		URL:  url,
+	}}
+
+	pipelineRunUpdate := &datamodel.PipelineRun{
+		Inputs: inputs,
+	}
+
+	if param.expiryRule.ExpirationDays > 0 {
+		blobExpiration := time.Now().UTC().AddDate(0, 0, param.expiryRule.ExpirationDays)
+		pipelineRunUpdate.BlobDataExpirationTime = null.TimeFrom(blobExpiration)
+	}
+
+	err = s.repository.UpdatePipelineRun(ctx, param.pipelineTriggerID, pipelineRunUpdate)
+	if err != nil {
+		s.log.Error("save pipeline run input data", zap.Error(err))
+		return err
+	}
+
+	s.log.Info("uploadPipelineRunInputsToMinio finished")
+
+	return nil
 }

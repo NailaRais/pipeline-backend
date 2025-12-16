@@ -20,14 +20,16 @@ import (
 	"gorm.io/plugin/dbresolver"
 
 	"github.com/instill-ai/pipeline-backend/config"
+	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/constant"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
-	"github.com/instill-ai/pipeline-backend/pkg/logger"
 	"github.com/instill-ai/pipeline-backend/pkg/resource"
 	"github.com/instill-ai/x/paginate"
 
-	errdomain "github.com/instill-ai/pipeline-backend/pkg/errors"
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	constantx "github.com/instill-ai/x/constant"
+	errorsx "github.com/instill-ai/x/errors"
+	resourcex "github.com/instill-ai/x/resource"
 )
 
 // TODO: in the repository, we'd better use uid as our function params
@@ -68,18 +70,20 @@ type Repository interface {
 
 	ListPipelinesAdmin(ctx context.Context, pageSize int64, pageToken string, isBasicView bool, filter filtering.Filter, showDeleted bool, embedReleases bool) ([]*datamodel.Pipeline, int64, string, error)
 	GetPipelineByIDAdmin(ctx context.Context, id string, isBasicView bool, embedReleases bool) (*datamodel.Pipeline, error)
-	GetPipelineByUIDAdmin(ctx context.Context, uid uuid.UUID, isBasicView bool, embedReleases bool) (*datamodel.Pipeline, error)
 	GetPipelineReleaseByUIDAdmin(ctx context.Context, uid uuid.UUID, isBasicView bool) (*datamodel.PipelineRelease, error)
 
+	ListAllComponentDefinitions(context.Context) ([]*datamodel.ComponentDefinition, error)
 	ListComponentDefinitionUIDs(context.Context, ListComponentDefinitionsParams) (uids []*datamodel.ComponentDefinition, totalSize int64, err error)
 	GetDefinitionByUID(context.Context, uuid.UUID) (*datamodel.ComponentDefinition, error)
-	UpsertComponentDefinition(context.Context, *pb.ComponentDefinition) error
+	UpsertComponentDefinition(context.Context, *pipelinepb.ComponentDefinition) error
+	DeleteComponentDefinition(context.Context, uuid.UUID) error
 	ListIntegrations(context.Context, ListIntegrationsParams) (IntegrationList, error)
 
 	CreateNamespaceConnection(context.Context, *datamodel.Connection) (*datamodel.Connection, error)
 	UpdateNamespaceConnectionByUID(context.Context, uuid.UUID, *datamodel.Connection) (*datamodel.Connection, error)
 	DeleteNamespaceConnectionByID(_ context.Context, nsUID uuid.UUID, id string) error
 	GetNamespaceConnectionByID(_ context.Context, nsUID uuid.UUID, id string) (*datamodel.Connection, error)
+	GetConnectionByUID(context.Context, uuid.UUID) (*datamodel.Connection, error)
 	ListNamespaceConnections(context.Context, ListNamespaceConnectionsParams) (ConnectionList, error)
 	ListPipelineIDsByConnectionID(context.Context, ListPipelineIDsByConnectionIDParams) (PipelinesByConnectionList, error)
 
@@ -101,6 +105,11 @@ type Repository interface {
 	UpdatePipelineRun(ctx context.Context, pipelineTriggerUID string, pipelineRun *datamodel.PipelineRun) error
 	UpsertComponentRun(ctx context.Context, componentRun *datamodel.ComponentRun) error
 	UpdateComponentRun(ctx context.Context, pipelineTriggerUID, componentID string, componentRun *datamodel.ComponentRun) error
+
+	ListPipelineRunOnsByIdentifier(ctx context.Context, ComponentType string, Identifier base.Identifier) (PipelineRunOnList, error)
+	ListPipelineRunOns(ctx context.Context, pipelineUID uuid.UUID) (PipelineRunOnList, error)
+	CreatePipelineRunOn(context.Context, *datamodel.PipelineRunOn) error
+	DeletePipelineRunOn(ctx context.Context, uid uuid.UUID) error
 
 	GetPaginatedPipelineRunsWithPermissions(ctx context.Context, requesterUID, pipelineUID string, page, pageSize int, filter filtering.Filter, order ordering.OrderBy, isOwner bool) ([]datamodel.PipelineRun, int64, error)
 	GetPaginatedComponentRunsByPipelineRunIDWithPermissions(ctx context.Context, pipelineRunID string, page, pageSize int, filter filtering.Filter, order ordering.OrderBy) ([]datamodel.ComponentRun, int64, error)
@@ -127,11 +136,11 @@ func (r *repository) toDomainErr(err error) error {
 
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" || errors.Is(err, gorm.ErrDuplicatedKey) {
-		return errdomain.ErrAlreadyExists
+		return errorsx.ErrAlreadyExists
 	}
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	return err
@@ -144,7 +153,7 @@ func decodeCursor[T any](token string) (cursor T, err error) {
 	}
 
 	if err := json.Unmarshal(b, &cursor); err != nil {
-		return cursor, fmt.Errorf("unmarshalling token: %w", err)
+		return cursor, fmt.Errorf("unmarshaling token: %w", err)
 	}
 
 	return cursor, nil
@@ -184,7 +193,7 @@ func (r *repository) GetHubStats(uidAllowList []uuid.UUID) (*datamodel.HubStats,
 func (r *repository) CheckPinnedUser(ctx context.Context, db *gorm.DB, table string) *gorm.DB {
 	db = db.WithContext(ctx)
 
-	userUID := resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey)
+	userUID := resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey)
 	if userUID == "" {
 		return db
 	}
@@ -200,7 +209,7 @@ func (r *repository) CheckPinnedUser(ctx context.Context, db *gorm.DB, table str
 // period to ensure that the data is synchronized from the primary DB to the
 // replica DB.
 func (r *repository) PinUser(ctx context.Context, table string) {
-	userUID := resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey)
+	userUID := resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey)
 	if userUID == "" {
 		return
 	}
@@ -275,7 +284,7 @@ func (r *repository) listPipelines(ctx context.Context, where string, whereArgs 
 	if pageToken != "" {
 		tokens, err := DecodeToken(pageToken)
 		if err != nil {
-			return nil, 0, "", newPageTokenErr(err)
+			return nil, 0, "", errorsx.NewPageTokenErr(err)
 		}
 
 		for _, o := range order.Fields {
@@ -485,14 +494,6 @@ func (r *repository) GetPipelineByIDAdmin(ctx context.Context, id string, isBasi
 	)
 }
 
-func (r *repository) GetPipelineByUIDAdmin(ctx context.Context, uid uuid.UUID, isBasicView bool, embedReleases bool) (*datamodel.Pipeline, error) {
-	return r.getNamespacePipeline(ctx,
-		"(uid = ?)",
-		[]interface{}{uid},
-		isBasicView,
-		embedReleases,
-	)
-}
 func (r *repository) GetPipelineReleaseByUIDAdmin(ctx context.Context, uid uuid.UUID, isBasicView bool) (*datamodel.PipelineRelease, error) {
 	db := r.CheckPinnedUser(ctx, r.db, "pipeline_release")
 
@@ -520,7 +521,7 @@ func (r *repository) UpdateNamespacePipelineByUID(ctx context.Context, uid uuid.
 		Updates(pipeline); result.Error != nil {
 		return result.Error
 	} else if result.RowsAffected == 0 {
-		return ErrNoDataUpdated
+		return errorsx.ErrNoDataUpdated
 	}
 	return nil
 }
@@ -539,7 +540,7 @@ func (r *repository) DeleteNamespacePipelineByID(ctx context.Context, ownerPerma
 	}
 
 	if result.RowsAffected == 0 {
-		return ErrNoDataDeleted
+		return errorsx.ErrNoDataDeleted
 	}
 
 	return nil
@@ -555,7 +556,7 @@ func (r *repository) UpdateNamespacePipelineIDByID(ctx context.Context, ownerPer
 		Update("id", newID); result.Error != nil {
 		return result.Error
 	} else if result.RowsAffected == 0 {
-		return ErrNoDataUpdated
+		return errorsx.ErrNoDataUpdated
 	}
 	return nil
 }
@@ -601,7 +602,7 @@ func (r *repository) ListNamespacePipelineReleases(ctx context.Context, ownerPer
 	if pageToken != "" {
 		createTime, uid, err := paginate.DecodeToken(pageToken)
 		if err != nil {
-			return nil, 0, "", newPageTokenErr(err)
+			return nil, 0, "", errorsx.NewPageTokenErr(err)
 		}
 		queryBuilder = queryBuilder.Where("(create_time,uid) < (?::timestamp, ?)", createTime, uid)
 	}
@@ -674,7 +675,7 @@ func (r *repository) UpdateNamespacePipelineReleaseByID(ctx context.Context, own
 		Updates(pipelineRelease); result.Error != nil {
 		return result.Error
 	} else if result.RowsAffected == 0 {
-		return ErrNoDataUpdated
+		return errorsx.ErrNoDataUpdated
 	}
 	return nil
 }
@@ -693,7 +694,7 @@ func (r *repository) DeleteNamespacePipelineReleaseByID(ctx context.Context, own
 	}
 
 	if result.RowsAffected == 0 {
-		return ErrNoDataDeleted
+		return errorsx.ErrNoDataDeleted
 	}
 
 	return nil
@@ -709,7 +710,7 @@ func (r *repository) UpdateNamespacePipelineReleaseIDByID(ctx context.Context, o
 		Update("id", newID); result.Error != nil {
 		return result.Error
 	} else if result.RowsAffected == 0 {
-		return ErrNoDataUpdated
+		return errorsx.ErrNoDataUpdated
 	}
 	return nil
 }
@@ -769,6 +770,12 @@ func (r *repository) ListComponentDefinitionUIDs(_ context.Context, p ListCompon
 		Where(where, whereArgs...).
 		Where("is_visible IS TRUE")
 
+	// TODO: refactor it with store.go in ins-7031
+	if config.Config.Server.Edition == config.EditionCloudStaging || config.Config.Server.Edition == config.EditionCloudProd {
+		skipComponentsInCloud := []string{"google-drive"}
+		queryBuilder = queryBuilder.Where("id NOT IN (?)", skipComponentsInCloud)
+	}
+
 	queryBuilder.Count(&totalSize)
 
 	// Several results might have the same score and release stage. We need to
@@ -794,6 +801,15 @@ func (r *repository) ListComponentDefinitionUIDs(_ context.Context, p ListCompon
 	return defs, totalSize, nil
 }
 
+// ListAllComponentDefinitions fetches all component definitions from the database.
+func (r *repository) ListAllComponentDefinitions(_ context.Context) ([]*datamodel.ComponentDefinition, error) {
+	var defs []*datamodel.ComponentDefinition
+	if err := r.db.Find(&defs).Error; err != nil {
+		return nil, err
+	}
+	return defs, nil
+}
+
 // GetComponentDefinition fetches the component definition datamodel given its
 // UID. Note that the repository only stores an index of the component
 // definition fields that the clients need to filter by and that the source of
@@ -813,13 +829,22 @@ func (r *repository) GetDefinitionByUID(_ context.Context, uid uuid.UUID) (*data
 // datamodel (i.e. the fields used for filtering) and stores it in the
 // database. If the record already exists, it will be updated with the provided
 // fields.
-func (r *repository) UpsertComponentDefinition(_ context.Context, cd *pb.ComponentDefinition) error {
+func (r *repository) UpsertComponentDefinition(_ context.Context, cd *pipelinepb.ComponentDefinition) error {
 	record := datamodel.ComponentDefinitionFromProto(cd)
 	result := r.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(record)
 	if result.Error != nil {
 		return result.Error
 	}
 
+	return nil
+}
+
+// DeleteComponentDefinition deletes a component definition from the database by its UID.
+func (r *repository) DeleteComponentDefinition(_ context.Context, uid uuid.UUID) error {
+	result := r.db.Where("uid = ?", uid.String()).Delete(&datamodel.ComponentDefinition{})
+	if result.Error != nil {
+		return result.Error
+	}
 	return nil
 }
 
@@ -869,6 +894,11 @@ func (r *repository) ListIntegrations(ctx context.Context, p ListIntegrationsPar
 	queryBuilder := db.Model(&datamodel.ComponentDefinition{}).
 		Where(where, whereArgs...).
 		Where("is_visible IS TRUE AND has_integration IS TRUE")
+
+	if config.Config.Server.Edition == config.EditionCloudStaging || config.Config.Server.Edition == config.EditionCloudProd {
+		skipComponentsInCloud := []string{"google-drive"}
+		queryBuilder = queryBuilder.Where("id NOT IN (?)", skipComponentsInCloud)
+	}
 
 	var count int64
 	queryBuilder.Count(&count)
@@ -1008,9 +1038,7 @@ func (r *repository) UpdateNamespaceSecretByID(ctx context.Context, ownerPermali
 	r.PinUser(ctx, "secret")
 	db := r.CheckPinnedUser(ctx, r.db, "secret")
 
-	logger, _ := logger.GetZapLogger(ctx)
 	if result := db.Select("*").Omit("UID").Model(&datamodel.Secret{}).Where("id = ? AND owner = ?", id, ownerPermalink).Updates(secret); result.Error != nil {
-		logger.Error(result.Error.Error())
 		return result.Error
 	}
 	return nil
@@ -1029,7 +1057,7 @@ func (r *repository) DeleteNamespaceSecretByID(ctx context.Context, ownerPermali
 	}
 
 	if result.RowsAffected == 0 {
-		return ErrNoDataDeleted
+		return errorsx.ErrNoDataDeleted
 	}
 
 	return nil
@@ -1072,7 +1100,7 @@ func (r *repository) DeletePipelineTags(ctx context.Context, pipelineUID uuid.UU
 
 	if result.RowsAffected == 0 {
 
-		return ErrNoDataDeleted
+		return errorsx.ErrNoDataDeleted
 
 	}
 
@@ -1359,7 +1387,7 @@ func (r *repository) UpdateNamespaceConnectionByUID(ctx context.Context, uid uui
 	}
 
 	if result.RowsAffected == 0 {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	// Extra query is used to return the associated integration.
@@ -1375,7 +1403,7 @@ func (r *repository) DeleteNamespaceConnectionByID(ctx context.Context, nsUID uu
 	}
 
 	if result.RowsAffected == 0 {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	return nil
@@ -1386,6 +1414,18 @@ func (r *repository) GetNamespaceConnectionByID(ctx context.Context, nsUID uuid.
 	q := db.Preload("Integration").Where("namespace_uid = ? AND id = ?", nsUID, id)
 	conn := new(datamodel.Connection)
 	if err := q.First(&conn).Error; err != nil {
+		return nil, r.toDomainErr(err)
+	}
+
+	return conn, nil
+}
+
+func (r *repository) GetConnectionByUID(ctx context.Context, uid uuid.UUID) (*datamodel.Connection, error) {
+	db := r.db.WithContext(ctx)
+
+	q := db.Preload("Integration")
+	conn := new(datamodel.Connection)
+	if err := q.First(&conn, uid).Error; err != nil {
 		return nil, r.toDomainErr(err)
 	}
 
@@ -1604,4 +1644,71 @@ func (r *repository) ListPipelineIDsByConnectionID(
 	}
 
 	return page, nil
+}
+
+type PipelineRunOnList struct {
+	PipelineRunOns []*datamodel.PipelineRunOn
+}
+
+func (r *repository) CreatePipelineRunOn(ctx context.Context, pipelineRunOn *datamodel.PipelineRunOn) error {
+	r.PinUser(ctx, "pipeline_run_on")
+	db := r.CheckPinnedUser(ctx, r.db, "pipeline_run_on")
+	err := db.Model(&datamodel.PipelineRunOn{}).Create(pipelineRunOn).Error
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" || errors.Is(err, gorm.ErrDuplicatedKey) {
+		return nil
+	}
+	return err
+}
+
+func (r *repository) GetPipelineRunOn(ctx context.Context, pipelineUID, releaseUID uuid.UUID) (*datamodel.PipelineRunOn, error) {
+	db := r.db.WithContext(ctx)
+	runOn := &datamodel.PipelineRunOn{}
+	err := db.Model(&datamodel.PipelineRunOn{}).Where("pipeline_uid = ? AND release_uid = ?", pipelineUID, releaseUID).First(runOn).Error
+	if err != nil {
+		return nil, err
+	}
+	return runOn, nil
+}
+
+func (r *repository) DeletePipelineRunOn(ctx context.Context, uid uuid.UUID) error {
+	r.PinUser(ctx, "pipeline_run_on")
+	db := r.CheckPinnedUser(ctx, r.db, "pipeline_run_on")
+	return db.Model(&datamodel.PipelineRunOn{}).
+		Where("uid = ?", uid).
+		Delete(&datamodel.PipelineRunOn{}).Error
+}
+
+func (r *repository) ListPipelineRunOns(ctx context.Context, pipelineUID uuid.UUID) (PipelineRunOnList, error) {
+	db := r.CheckPinnedUser(ctx, r.db, "pipeline_run_on")
+
+	var runOns []*datamodel.PipelineRunOn
+	err := db.Model(&datamodel.PipelineRunOn{}).Where("pipeline_uid = ?", pipelineUID).Find(&runOns).Error
+	if err != nil {
+		return PipelineRunOnList{}, err
+	}
+	return PipelineRunOnList{
+		PipelineRunOns: runOns,
+	}, nil
+}
+
+func (r *repository) ListPipelineRunOnsByIdentifier(ctx context.Context, componentType string, identifier base.Identifier) (PipelineRunOnList, error) {
+	db := r.CheckPinnedUser(ctx, r.db, "pipeline_run_on")
+
+	var runOns []*datamodel.PipelineRunOn
+
+	identifierJSON, err := json.Marshal(identifier)
+	if err != nil {
+		return PipelineRunOnList{}, err
+	}
+
+	err = db.Model(&datamodel.PipelineRunOn{}).
+		Where("run_on_type = ? AND identifier = ?", componentType, string(identifierJSON)).
+		Find(&runOns).Error
+	if err != nil {
+		return PipelineRunOnList{}, err
+	}
+	return PipelineRunOnList{
+		PipelineRunOns: runOns,
+	}, nil
 }

@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [Ask your Catalog](https://instill.tech/instill-ai/pipelines/ask-your-catalog/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -17,15 +15,15 @@ variable:
   catalog_name:
     title: catalog-name
     description: The name of your catalog i.e. "instill-ai"
-    instill-format: string
+    type: string
   namespace:
     title: namespace
     description: The namespace of your catalog i.e. "instill-ai"
-    instill-format: string
+    type: string
   question:
     title: question
     description: The question to ask your catalog i.e. "What is Instill AI doing?", "What is Artifact?"
-    instill-format: string
+    type: string
 output:
   answer:
     title: answer
@@ -33,22 +31,21 @@ output:
 ```
 
 
-### Sync files from Google Drive to Instill Catalog
+Sync files from Google Drive to Instill Catalog.
 
 ```yaml
-# VDP Version
 version: v1beta
 
 variable:
   namespace:
     title: Namespace
-    instill-format: string
+    type: string
   catalog:
     title: Catalog
-    instill-format: string
+    type: string
   folder-link:
     title: Folder Link
-    instill-format: string
+    type: string
 
 component:
   read-folder:

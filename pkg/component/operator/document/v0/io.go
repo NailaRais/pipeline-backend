@@ -2,11 +2,15 @@ package document
 
 import "github.com/instill-ai/pipeline-backend/pkg/data/format"
 
+// ConvertDocumentToMarkdownInput contains the public input parameters for
+// `TASK_CONVERT_TO_MARKDOWN`.
 type ConvertDocumentToMarkdownInput struct {
 	Document            format.Document `instill:"document"`
-	DisplayImageTag     bool            `instill:"display-image-tag"`
+	DisplayImageTag     bool            `instill:"display-image-tag,default=false"`
 	Filename            string          `instill:"filename"`
-	DisplayAllPageImage bool            `instill:"display-all-page-image"`
+	DisplayAllPageImage bool            `instill:"display-all-page-image,default=false"`
+	Resolution          int             `instill:"resolution,default=300"`
+	Converter           string          `instill:"converter,default=pdfplumber"`
 }
 
 type ConvertDocumentToMarkdownOutput struct {
@@ -19,8 +23,9 @@ type ConvertDocumentToMarkdownOutput struct {
 }
 
 type ConvertDocumentToImagesInput struct {
-	Document format.Document `instill:"document"`
-	Filename string          `instill:"filename"`
+	Document   format.Document `instill:"document"`
+	Filename   string          `instill:"filename"`
+	Resolution int             `instill:"resolution,default=300"`
 }
 
 type ConvertDocumentToImagesOutput struct {
@@ -46,4 +51,15 @@ type ConvertToTextOutput struct {
 	// Error: Error message if any during the conversion process
 	Error    string `instill:"error"`
 	Filename string `instill:"filename"`
+}
+
+// SplitInPagesInput defines the input for the page split task.
+type SplitInPagesInput struct {
+	BatchSize uint32          `instill:"batch-size"`
+	Document  format.Document `instill:"document"`
+}
+
+// SplitInPagesOutput defines the output for the page split task.
+type SplitInPagesOutput struct {
+	Batches []format.Document `instill:"batches"`
 }

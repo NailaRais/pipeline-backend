@@ -19,6 +19,7 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/mock"
 	"github.com/instill-ai/pipeline-backend/pkg/data"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 )
 
 func TestDetectActivity(t *testing.T) {
@@ -78,7 +79,7 @@ func TestDetectActivity(t *testing.T) {
 			ir.ReadDataMock.Set(func(ctx context.Context, input any) error {
 				switch input := input.(type) {
 				case *detectActivityInput:
-					audio, err := data.NewAudioFromBytes(audioData, "audio/wav", "input.wav")
+					audio, err := data.NewAudioFromBytes(audioData, data.WAV, "input.wav", true)
 					c.Assert(err, qt.IsNil)
 					*input = detectActivityInput{
 						Audio:              audio,
@@ -124,7 +125,9 @@ func TestDetectActivity(t *testing.T) {
 				jsonValue, err := data.NewJSONValue(segmentsMap)
 				c.Assert(err, qt.IsNil)
 
-				c.Assert(data.Unmarshal(jsonValue, &expectedSegmentsStruct), qt.IsNil)
+				binaryFetcher := external.NewBinaryFetcher()
+				unmarshaler := data.NewUnmarshaler(binaryFetcher)
+				c.Assert(unmarshaler.Unmarshal(context.Background(), jsonValue, &expectedSegmentsStruct), qt.IsNil)
 				expectedSegments := expectedSegmentsStruct.Segments
 
 				c.Assert(capturedOutput.Segments, qt.HasLen, len(expectedSegments))

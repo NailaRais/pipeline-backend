@@ -17,7 +17,7 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
 )
 
 const (
@@ -27,14 +27,14 @@ const (
 
 var instillUpstreamTypes = []string{"value", "reference", "template"}
 
-//go:embed config/definition.json
-var definitionJSON []byte
+//go:embed config/definition.yaml
+var definitionYAML []byte
 
-//go:embed config/setup.json
-var setupJSON []byte
+//go:embed config/setup.yaml
+var setupYAML []byte
 
-//go:embed config/tasks.json
-var tasksJSON []byte
+//go:embed config/tasks.yaml
+var tasksYAML []byte
 
 var once sync.Once
 var comp *component
@@ -50,7 +50,7 @@ type execution struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -177,7 +177,7 @@ type Column struct {
 	Type string
 }
 
-func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.ComponentConfig) (*pb.ComponentDefinition, error) {
+func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.ComponentConfig) (*pipelinepb.ComponentDefinition, error) {
 
 	ctx := context.Background()
 	oriDef, err := c.Component.GetDefinition(nil, nil)
@@ -189,7 +189,7 @@ func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.Compo
 		return oriDef, nil
 	}
 
-	def := proto.Clone(oriDef).(*pb.ComponentDefinition)
+	def := proto.Clone(oriDef).(*pipelinepb.ComponentDefinition)
 	client, err := NewClient(compConfig.Setup["json-key"].(string), compConfig.Setup["project-id"].(string))
 	if err != nil || client == nil {
 		return nil, fmt.Errorf("error creating BigQuery client: %v", err)
@@ -278,14 +278,12 @@ func constructTableProperties(tables []TableColumns) ([]*structpb.Struct, error)
 		propertiesMap := make(map[string]interface{})
 		for idx, column := range table.Columns {
 			propertiesMap[column.Name] = map[string]interface{}{
-				"title":                column.Name,
-				"instillUIOrder":       idx,
-				"description":          "Column " + column.Name + " of table " + table.TableName,
-				"instillFormat":        getInstillAcceptFormat(column.Type),
-				"instillUpstreamTypes": instillUpstreamTypes,
-				"instillAcceptFormats": []string{getInstillAcceptFormat(column.Type)},
-				"required":             []string{},
-				"type":                 getInstillAcceptFormat(column.Type),
+				"title":         column.Name,
+				"uiOrder":       idx,
+				"description":   "Column " + column.Name + " of table " + table.TableName,
+				"type":          getInstillType(column.Type),
+				"upstreamTypes": instillUpstreamTypes,
+				"required":      []string{},
 			}
 		}
 		propertyStructPB, err := base.ConvertToStructpb(propertiesMap)
@@ -298,7 +296,7 @@ func constructTableProperties(tables []TableColumns) ([]*structpb.Struct, error)
 	return tableProperties, nil
 }
 
-func getInstillAcceptFormat(tableType string) string {
+func getInstillType(tableType string) string {
 	switch tableType {
 	case "STRING":
 		return "string"

@@ -2,18 +2,16 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
-	"github.com/PaesslerAG/jsonpath"
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofrs/uuid"
 	"go.einride.tech/aip/filtering"
 	"go.einride.tech/aip/ordering"
@@ -22,7 +20,6 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -30,20 +27,24 @@ import (
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/instill-ai/pipeline-backend/config"
+	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/constant"
 	"github.com/instill-ai/pipeline-backend/pkg/data"
+	"github.com/instill-ai/pipeline-backend/pkg/data/format"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
-	"github.com/instill-ai/pipeline-backend/pkg/logger"
 	"github.com/instill-ai/pipeline-backend/pkg/recipe"
 	"github.com/instill-ai/pipeline-backend/pkg/resource"
 	"github.com/instill-ai/pipeline-backend/pkg/utils"
 	"github.com/instill-ai/pipeline-backend/pkg/worker"
-	"github.com/instill-ai/x/errmsg"
+	"github.com/instill-ai/x/minio"
 
-	errdomain "github.com/instill-ai/pipeline-backend/pkg/errors"
 	mgmtpb "github.com/instill-ai/protogen-go/core/mgmt/v1beta"
-	pipelinepb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	constantx "github.com/instill-ai/x/constant"
+	errorsx "github.com/instill-ai/x/errors"
+	logx "github.com/instill-ai/x/log"
 	resourcex "github.com/instill-ai/x/resource"
+	temporalx "github.com/instill-ai/x/temporal"
 )
 
 var preserveTags = []string{"featured", "feature"}
@@ -118,7 +119,7 @@ func (s *service) GetPipelineByUID(ctx context.Context, uid uuid.UUID, view pipe
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", uid, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, uid, view <= pipelinepb.Pipeline_VIEW_BASIC, true)
@@ -144,10 +145,10 @@ func (s *service) CreateNamespacePipeline(ctx context.Context, ns resource.Names
 			return nil, err
 		}
 		if !granted {
-			return nil, errdomain.ErrUnauthorized
+			return nil, errorsx.ErrUnauthorized
 		}
-	} else if ns.NsUID != uuid.FromStringOrNil(resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey)) {
-		return nil, errdomain.ErrUnauthorized
+	} else if ns.NsUID != uuid.FromStringOrNil(resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey)) {
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	dbPipeline, err := s.converter.ConvertPipelineToDB(ctx, ns, pbPipeline)
@@ -161,9 +162,6 @@ func (s *service) CreateNamespacePipeline(ctx context.Context, ns resource.Names
 	}
 
 	dbPipeline.ShareCode = generateShareCode()
-	if err := s.setSchedulePipeline(ctx, ns, dbPipeline.ID, "", dbPipeline.UID, uuid.Nil, dbPipeline.Recipe); err != nil {
-		return nil, err
-	}
 
 	if err := s.repository.CreateNamespacePipeline(ctx, dbPipeline); err != nil {
 		return nil, err
@@ -173,6 +171,16 @@ func (s *service) CreateNamespacePipeline(ctx context.Context, ns resource.Names
 	if err != nil {
 		return nil, err
 	}
+
+	if err := s.configureRunOn(ctx, configureRunOnParams{
+		Namespace:   ns,
+		pipelineUID: dbPipeline.UID,
+		releaseUID:  uuid.Nil,
+		recipe:      dbCreatedPipeline.Recipe,
+	}); err != nil {
+		return nil, err
+	}
+
 	ownerType := string(ns.NsType)[0 : len(string(ns.NsType))-1]
 	ownerUID := ns.NsUID
 	err = s.aclClient.SetOwner(ctx, "pipeline", dbCreatedPipeline.UID, ownerType, ownerUID)
@@ -276,13 +284,13 @@ func (s *service) GetNamespacePipelineByID(ctx context.Context, ns resource.Name
 
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, view <= pipelinepb.Pipeline_VIEW_BASIC, true)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	return s.converter.ConvertPipelineToPB(ctx, dbPipeline, view, true, true)
@@ -307,7 +315,7 @@ func (s *service) GetNamespacePipelineLatestReleaseUID(ctx context.Context, ns r
 
 func (s *service) GetPipelineByUIDAdmin(ctx context.Context, uid uuid.UUID, view pipelinepb.Pipeline_View) (*pipelinepb.Pipeline, error) {
 
-	dbPipeline, err := s.repository.GetPipelineByUIDAdmin(ctx, uid, view <= pipelinepb.Pipeline_VIEW_BASIC, true)
+	dbPipeline, err := s.repository.GetPipelineByUID(ctx, uid, view <= pipelinepb.Pipeline_VIEW_BASIC, true)
 	if err != nil {
 		return nil, err
 	}
@@ -316,59 +324,199 @@ func (s *service) GetPipelineByUIDAdmin(ctx context.Context, uid uuid.UUID, view
 
 }
 
-func (s *service) setSchedulePipeline(ctx context.Context, ns resource.Namespace, pipelineID, pipelineReleaseID string, pipelineUID, releaseUID uuid.UUID, recipe *datamodel.Recipe) error {
-	// TODO This check could be removed, as the receiver should be initialized
-	// at this point. However, some tests depend on it, so we would need to
-	// either mock this interface or (better) communicate with Temporal through
-	// our own interface.
-	if s.temporalClient == nil {
+type configureRunOnParams struct {
+	resource.Namespace
+	pipelineUID uuid.UUID
+	releaseUID  uuid.UUID
+	recipe      *datamodel.Recipe
+}
+
+func (s *service) marshalEventSettings(ctx context.Context, ns resource.Namespace, config, setup any) (format.Value, format.Value, error) {
+	marshaler := data.NewMarshaler()
+	cfg, err := marshaler.Marshal(config)
+	if err != nil {
+		return nil, nil, err
+	}
+	var st format.Value
+	if setup != nil {
+		st, err = marshaler.Marshal(setup)
+		if err != nil {
+			return nil, nil, err
+		}
+		if connRef, ok := st.(format.ReferenceString); ok {
+			connID, err := recipe.ConnectionIDFromReference(connRef.String())
+			if err != nil {
+				return nil, nil, err
+			}
+
+			conn, err := s.repository.GetNamespaceConnectionByID(ctx, ns.NsUID, connID)
+			if err != nil {
+				if errors.Is(err, errorsx.ErrNotFound) {
+					err = errorsx.AddMessage(err, fmt.Sprintf("Connection %s doesn't exist.", connID))
+				}
+				return nil, nil, err
+			}
+
+			var s map[string]any
+			if err := json.Unmarshal(conn.Setup, &s); err != nil {
+				return nil, nil, err
+			}
+
+			setupVal, err := data.NewValue(s)
+			if err != nil {
+				return nil, nil, err
+			}
+			st = setupVal
+		}
+	}
+	return cfg, st, nil
+}
+
+func (s *service) configureRunOn(ctx context.Context, params configureRunOnParams) error {
+
+	dbPipeline, err := s.repository.GetPipelineByUID(ctx, params.pipelineUID, false, true)
+	if err != nil {
+		return err
+	}
+
+	switch {
+
+	// Case 1: Update unversioned pipeline and there is no existing release
+	case params.releaseUID == uuid.Nil && len(dbPipeline.Releases) == 0:
+		if err := s.clearRunOn(ctx, params); err != nil {
+			return err
+		}
+		if err := s.updateRunOn(ctx, params); err != nil {
+			return err
+		}
+		return nil
+
+	// Case 2: Update versioned pipeline
+	case params.releaseUID != uuid.Nil:
+		if err := s.clearRunOn(ctx, params); err != nil {
+			return err
+		}
+		if err := s.updateRunOn(ctx, params); err != nil {
+			return err
+		}
+		return nil
+
+	// Case 3: Update unversioned pipeline but there are existing releases
+	default:
+		// Do nothing
 		return nil
 	}
 
-	crons := []string{}
-	if recipe != nil && recipe.On != nil && recipe.On.Schedule != nil {
-		for _, v := range recipe.On.Schedule {
-			crons = append(crons, v.Cron)
-		}
+}
+
+func (s *service) clearRunOn(ctx context.Context, params configureRunOnParams) error {
+	// Unregister all webhooks from vendor
+	runOn, err := s.repository.ListPipelineRunOns(ctx, params.pipelineUID)
+	if err != nil {
+		return err
 	}
 
-	scheduleID := fmt.Sprintf("%s_%s_schedule", pipelineUID, releaseUID)
-
-	handle := s.temporalClient.ScheduleClient().GetHandle(ctx, scheduleID)
-	_ = handle.Delete(ctx)
-
-	if len(crons) > 0 {
-
-		param := &worker.SchedulePipelineWorkflowParam{
-			Namespace:          ns,
-			PipelineID:         pipelineID,
-			PipelineUID:        pipelineUID,
-			PipelineReleaseID:  pipelineReleaseID,
-			PipelineReleaseUID: releaseUID,
+	for _, r := range runOn.PipelineRunOns {
+		var origCfg any
+		var origSetup any
+		if r.Config != nil {
+			err = json.Unmarshal(r.Config, &origCfg)
+			if err != nil {
+				return err
+			}
 		}
-		_, err := s.temporalClient.ScheduleClient().Create(ctx, client.ScheduleOptions{
-			ID: scheduleID,
-			Spec: client.ScheduleSpec{
-				CronExpressions: crons,
-			},
-			Action: &client.ScheduleWorkflowAction{
-				Args:      []any{param},
-				ID:        scheduleID,
-				Workflow:  "SchedulePipelineWorkflow",
-				TaskQueue: worker.TaskQueue,
-				RetryPolicy: &temporal.RetryPolicy{
-					MaximumAttempts: 1,
+		if r.Setup != nil {
+			err = json.Unmarshal(r.Setup, &origSetup)
+			if err != nil {
+				return err
+			}
+		}
+		cfg, setup, err := s.marshalEventSettings(ctx, params.Namespace, origCfg, origSetup)
+		if err == nil {
+			identifier := base.Identifier{}
+			err = json.Unmarshal(r.Identifier, &identifier)
+			if err != nil {
+				return err
+			}
+			err = s.component.UnregisterEvent(ctx, r.RunOnType, &base.UnregisterEventSettings{
+				EventSettings: base.EventSettings{
+					Config: cfg,
+					Setup:  setup,
 				},
-			},
-		})
-
-		if err != nil {
-			return err
+			}, []base.Identifier{identifier})
+			if err != nil {
+				return err
+			}
+			err = s.repository.DeletePipelineRunOn(ctx, r.UID)
+			if err != nil {
+				return err
+			}
 		}
+
 	}
 
 	return nil
 }
+
+func (s *service) updateRunOn(ctx context.Context, params configureRunOnParams) error {
+
+	if params.recipe == nil {
+		return nil
+	}
+
+	// Register all events from vendor
+	if params.recipe != nil && len(params.recipe.On) > 0 {
+		for eventID, v := range params.recipe.On {
+			if v != nil {
+				cfg, setup, err := s.marshalEventSettings(ctx, params.Namespace, v.Config, v.Setup)
+				if err == nil {
+					registrationUID := params.pipelineUID
+					if params.releaseUID != uuid.Nil {
+						registrationUID = params.releaseUID
+					}
+					identifiers, err := s.component.RegisterEvent(ctx, v.Type, &base.RegisterEventSettings{
+						EventSettings: base.EventSettings{
+							Config: cfg,
+							Setup:  setup,
+						},
+						RegistrationUID: registrationUID,
+					})
+					if err != nil {
+						return err
+					}
+					for _, identifier := range identifiers {
+						jsonIdentifier, err := json.Marshal(identifier)
+						if err != nil {
+							return err
+						}
+						jsonConfig, err := json.Marshal(v.Config)
+						if err != nil {
+							return err
+						}
+						jsonSetup, err := json.Marshal(v.Setup)
+						if err != nil {
+							return err
+						}
+						err = s.repository.CreatePipelineRunOn(ctx, &datamodel.PipelineRunOn{
+							RunOnType:   v.Type,
+							EventID:     eventID,
+							Identifier:  jsonIdentifier,
+							PipelineUID: params.pipelineUID,
+							ReleaseUID:  params.releaseUID,
+							Config:      jsonConfig,
+							Setup:       jsonSetup,
+						})
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (s *service) UpdateNamespacePipelineByID(ctx context.Context, ns resource.Namespace, id string, toUpdPipeline *pipelinepb.Pipeline) (*pipelinepb.Pipeline, error) {
 
 	ownerPermalink := ns.Permalink()
@@ -387,27 +535,23 @@ func (s *service) UpdateNamespacePipelineByID(ctx context.Context, ns resource.N
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	var existingPipeline *datamodel.Pipeline
 	// Validation: Pipeline existence
-	if existingPipeline, _ = s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, true, false); existingPipeline == nil {
+	if existingPipeline, _ = s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, false); existingPipeline == nil {
 		return nil, err
 	}
 
 	if existingPipeline.ShareCode == "" {
 		dbPipeline.ShareCode = generateShareCode()
-	}
-
-	if err := s.setSchedulePipeline(ctx, ns, dbPipeline.ID, "", dbPipeline.UID, uuid.Nil, dbPipeline.Recipe); err != nil {
-		return nil, err
 	}
 
 	if err := s.repository.UpdateNamespacePipelineByUID(ctx, dbPipeline.UID, dbPipeline); err != nil {
@@ -454,6 +598,15 @@ func (s *service) UpdateNamespacePipelineByID(ctx context.Context, ns resource.N
 		return nil, err
 	}
 
+	if err := s.configureRunOn(ctx, configureRunOnParams{
+		Namespace:   ns,
+		pipelineUID: dbPipeline.UID,
+		releaseUID:  uuid.Nil,
+		recipe:      dbPipeline.Recipe,
+	}); err != nil {
+		return nil, err
+	}
+
 	oldSharing, _ := json.Marshal(existingPipeline.Sharing)
 	newSharing, _ := json.Marshal(dbPipeline.Sharing)
 
@@ -485,19 +638,19 @@ func (s *service) DeleteNamespacePipelineByID(ctx context.Context, ns resource.N
 
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, true)
 	if err != nil {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrUnauthorized
+		return errorsx.ErrUnauthorized
 	}
 
 	// TODO: pagination
@@ -541,20 +694,21 @@ func (s *service) generateCloneTargetNamespace(ctx context.Context, targetNamesp
 	}
 
 	var targetNS resource.Namespace
-	if resp.Type == mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_USER {
+	switch resp.Type {
+	case mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_USER:
 		targetNS = resource.Namespace{
 			NsType: resource.User,
 			NsID:   targetNamespace,
 			NsUID:  uuid.FromStringOrNil(resp.Uid),
 		}
-	} else if resp.Type == mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_ORGANIZATION {
+	case mgmtpb.CheckNamespaceAdminResponse_NAMESPACE_ORGANIZATION:
 		targetNS = resource.Namespace{
 			NsType: resource.Organization,
 			NsID:   targetNamespace,
 			NsUID:  uuid.FromStringOrNil(resp.Uid),
 		}
-	} else {
-		return resource.Namespace{}, errdomain.ErrInvalidCloneTarget
+	default:
+		return resource.Namespace{}, errorsx.ErrInvalidArgument
 	}
 
 	return targetNS, nil
@@ -624,19 +778,19 @@ func (s *service) ValidateNamespacePipelineByID(ctx context.Context, ns resource
 
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, true)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "executor"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	validateErrs, err := s.checkRecipe(dbPipeline.Recipe)
@@ -655,18 +809,18 @@ func (s *service) UpdateNamespacePipelineIDByID(ctx context.Context, ns resource
 	// Validation: Pipeline existence
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, true, true)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	if err := s.repository.UpdateNamespacePipelineIDByID(ctx, ownerPermalink, id, newID); err != nil {
@@ -681,402 +835,558 @@ func (s *service) UpdateNamespacePipelineIDByID(ctx context.Context, ns resource
 	return s.converter.ConvertPipelineToPB(ctx, dbPipeline, pipelinepb.Pipeline_VIEW_FULL, true, true)
 }
 
-func (s *service) preTriggerPipeline(ctx context.Context, ns resource.Namespace, r *datamodel.Recipe, pipelineTriggerID string, pipelineData []*pipelinepb.TriggerData) error {
+// preTriggerPipeline does the following:
+//  1. Upload pipeline input data to MinIO if the data is blob data.
+//  2. New workflow memory.
+//     a. Set the default values for the variables for memory data and
+//     uploading pipeline data.
+//     b. Set the data with data.Value for the memory data, which will be
+//     used for pipeline running.
+//     c. Upload "uploading pipeline data" to minio for pipeline run logger.
+//  3. Map the settings in recipe to the format in workflow memory.
+//  4. Enable the streaming mode when the header contains "text/event-stream"
+//  5. Commit the workflow memory so workers can access it.
+//
+// We upload User Input Data by `uploadBlobAndGetDownloadURL`, which exposes
+// the public URL because it will be used by `console` & external users.
+// We upload Pipeline Input Data by `uploadPipelineRunInputsToMinio`, which
+// does not expose the public URL. The URL will be used by pipeline run logger.
+func (s *service) preTriggerPipeline(
+	ctx context.Context,
+	requester resource.Namespace,
+	r *datamodel.Recipe,
+	pipelineTriggerID string,
+	pipelineData []*pipelinepb.TriggerData,
+	expiryRule minio.ExpiryRule,
+) error {
 	batchSize := len(pipelineData)
 	if batchSize > constant.MaxBatchSize {
-		return ErrExceedMaxBatchSize
+		return errorsx.ErrExceedMaxBatchSize
 	}
 
-	instillFormatMap := map[string]string{}
+	typeMap := map[string]string{}
 	defaultValueMap := map[string]any{}
 
 	for k, v := range r.Variable {
-		instillFormatMap[k] = v.InstillFormat
+		typeMap[k] = v.Type
 		defaultValueMap[k] = v.Default
 	}
 
 	errors := []string{}
 
-	for idx, data := range pipelineData {
+	for _, data := range pipelineData {
 		vars := data.Variable
-		b, err := protojson.Marshal(vars)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("inputs[%d]: data error", idx))
-			continue
-		}
-		var i any
-		if err := json.Unmarshal(b, &i); err != nil {
-			errors = append(errors, fmt.Sprintf("inputs[%d]: data error", idx))
-			continue
-		}
-
-		m := i.(map[string]any)
-
+		m := vars.AsMap()
 		for k := range m {
-			switch s := m[k].(type) {
+			switch str := m[k].(type) {
 			case string:
-				if instillFormatMap[k] != "string" {
-					// Skip the base64 decoding if the string is a URL
-					if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+				if isUnstructuredType(typeMap[k]) {
+					// Skip the base64 decoding if the string is a URL.
+					if strings.HasPrefix(str, "http://") || strings.HasPrefix(str, "https://") {
 						continue
 					}
-					if !strings.HasPrefix(s, "data:") {
-						b, err := base64.StdEncoding.DecodeString(s)
-						if err != nil {
-							return fmt.Errorf("can not decode file %s, %s", instillFormatMap[k], s)
-						}
-						mimeType := strings.Split(mimetype.Detect(b).String(), ";")[0]
-						vars.Fields[k] = structpb.NewStringValue(fmt.Sprintf("data:%s;base64,%s", mimeType, s))
+					downloadURL, err := s.uploadBlobAndGetDownloadURL(ctx, str, requester, expiryRule)
+					if err != nil {
+						return fmt.Errorf("upload blob and get download url: %w", err)
 					}
-
+					vars.Fields[k] = structpb.NewStringValue(downloadURL)
 				}
 			case []string:
-				if instillFormatMap[k] != "array:string" {
-					for idx := range s {
+				if isUnstructuredType(typeMap[k]) {
+					for idx := range str {
 						// Skip the base64 decoding if the string is a URL
-						if strings.HasPrefix(s[idx], "http://") || strings.HasPrefix(s[idx], "https://") {
+						if strings.HasPrefix(str[idx], "http://") || strings.HasPrefix(str[idx], "https://") {
 							continue
 						}
-						if !strings.HasPrefix(s[idx], "data:") {
-							b, err := base64.StdEncoding.DecodeString(s[idx])
-							if err != nil {
-								return fmt.Errorf("can not decode file %s, %s", instillFormatMap[k], s)
-							}
-							mimeType := strings.Split(mimetype.Detect(b).String(), ";")[0]
-							vars.Fields[k].GetListValue().GetValues()[idx] = structpb.NewStringValue(fmt.Sprintf("data:%s;base64,%s", mimeType, s[idx]))
+						downloadURL, err := s.uploadBlobAndGetDownloadURL(ctx, str[idx], requester, expiryRule)
+						if err != nil {
+							return fmt.Errorf("upload blob and get download url: %w", err)
 						}
+						vars.Fields[k] = structpb.NewStringValue(downloadURL)
 
 					}
 				}
 			}
 		}
-
 	}
 
 	if len(errors) > 0 {
 		return fmt.Errorf("[Pipeline Trigger Data Error] %s", strings.Join(errors, "; "))
 	}
 
-	wfm, err := s.memory.NewWorkflowMemory(ctx, pipelineTriggerID, nil, len(pipelineData))
+	wfm, err := s.memory.NewWorkflowMemory(ctx, pipelineTriggerID, len(pipelineData))
 	if err != nil {
 		return err
 	}
 
-	formats := map[string][]string{}
-	for k, v := range instillFormatMap {
-		formats[k] = []string{v}
+	defer s.memory.PurgeWorkflowMemory(pipelineTriggerID)
+
+	types := map[string][]string{}
+	for k, v := range typeMap {
+		types[k] = []string{v}
 	}
 
+	uploadingPipelineData := make([]map[string]any, len(pipelineData))
+
+	// TODO(huitang): implement a structpb to format.Value converter
 	for idx, d := range pipelineData {
+		uploadingPipelineData[idx] = make(map[string]any)
 
 		variable := data.Map{}
-		for k := range instillFormatMap {
+		for k := range typeMap {
 			v := d.Variable.Fields[k]
-			if _, ok := instillFormatMap[k]; !ok {
+			if _, ok := typeMap[k]; !ok {
 				continue
 			}
 
 			if v == nil {
+				// If the field is required but no value is provided, return an error.
+				if r.Variable[k].Required {
+					return fmt.Errorf("missing required variable: %s", k)
+				}
+
+				// If the field has no value and no default value is specified,
+				// represent it as null. A null value indicates that the field
+				// is missing and should be handled as such by components.
 				if d, ok := defaultValueMap[k]; !ok || d == nil {
-					return fmt.Errorf("%w: missing or invalid value for %s field \"%s\"", errdomain.ErrInvalidArgument, instillFormatMap[k], k)
+					variable[k] = data.NewNull()
+					uploadingPipelineData[idx][k] = nil
+					continue
 				}
 			}
 
-			switch instillFormatMap[k] {
+			switch typeMap[k] {
 			case "boolean":
 				if v == nil {
 					variable[k] = data.NewBoolean(defaultValueMap[k].(bool))
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(bool)
 				} else {
+					if _, ok := v.Kind.(*structpb.Value_BoolValue); !ok {
+						return fmt.Errorf("%w: invalid boolean value: %v", errorsx.ErrInvalidArgument, v)
+					}
 					variable[k] = data.NewBoolean(v.GetBoolValue())
+					uploadingPipelineData[idx][k] = v.GetBoolValue()
 				}
 			case "array:boolean":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx] = data.NewBoolean(val.(bool))
+					uploadingDataArray := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i] = data.NewBoolean(val.(bool))
+						uploadingDataArray[i] = val.(bool)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx] = data.NewBoolean(val.GetBoolValue())
+					uploadingDataArray := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_BoolValue); !ok {
+							return fmt.Errorf("%w: invalid boolean value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i] = data.NewBoolean(val.GetBoolValue())
+						uploadingDataArray[i] = val.GetBoolValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				}
 			case "string":
 				if v == nil {
 					variable[k] = data.NewString(defaultValueMap[k].(string))
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
 					variable[k] = data.NewString(v.GetStringValue())
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:string":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx] = data.NewString(val.(string))
+					uploadingDataArray := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i] = data.NewString(val.(string))
+						uploadingDataArray[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx] = data.NewString(val.GetStringValue())
+					uploadingDataArray := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i] = data.NewString(val.GetStringValue())
+						uploadingDataArray[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				}
 			case "integer":
 				if v == nil {
 					variable[k] = data.NewNumberFromFloat(defaultValueMap[k].(float64))
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(float64)
 				} else {
+					if _, ok := v.Kind.(*structpb.Value_NumberValue); !ok {
+						return fmt.Errorf("%w: invalid number value: %v", errorsx.ErrInvalidArgument, v)
+					}
 					variable[k] = data.NewNumberFromFloat(v.GetNumberValue())
+					uploadingPipelineData[idx][k] = v.GetNumberValue()
 				}
 			case "array:integer":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx] = data.NewNumberFromFloat(val.(float64))
+					uploadingDataArray := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i] = data.NewNumberFromFloat(val.(float64))
+						uploadingDataArray[i] = val.(float64)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx] = data.NewNumberFromFloat(val.GetNumberValue())
+					uploadingDataArray := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_NumberValue); !ok {
+							return fmt.Errorf("%w: invalid number value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i] = data.NewNumberFromFloat(val.GetNumberValue())
+						uploadingDataArray[i] = val.GetNumberValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				}
 			case "number":
 				if v == nil {
-					variable[k] = data.NewNumberFromFloat(defaultValueMap[k].(float64))
+
+					// TODO: this is a temporary solution to handle the default
+					// value of integer type, we will implement a better
+					// solution for conversion JSON betweeen instill format
+					switch num := defaultValueMap[k].(type) {
+					case int:
+						variable[k] = data.NewNumberFromFloat(float64(num))
+						uploadingPipelineData[idx][k] = float64(num)
+					case float64:
+						variable[k] = data.NewNumberFromFloat(num)
+						uploadingPipelineData[idx][k] = num
+					default:
+						return fmt.Errorf("invalid number value: %v", defaultValueMap[k])
+					}
+
 				} else {
+					if _, ok := v.Kind.(*structpb.Value_NumberValue); !ok {
+						return fmt.Errorf("%w: invalid number value: %v", errorsx.ErrInvalidArgument, v)
+					}
 					variable[k] = data.NewNumberFromFloat(v.GetNumberValue())
+					uploadingPipelineData[idx][k] = v.GetNumberValue()
 				}
 			case "array:number":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx] = data.NewNumberFromFloat(val.(float64))
+					uploadingDataArray := make([]any, len(defaultValueMap[k].([]any)))
+
+					// TODO: this is a temporary solution to handle the default
+					// value of integer type, we will implement a better
+					// solution for conversion JSON betweeen instill type
+					for i, val := range defaultValueMap[k].([]any) {
+						switch num := val.(type) {
+						case int:
+							array[i] = data.NewNumberFromFloat(float64(num))
+							uploadingDataArray[i] = float64(num)
+						case float64:
+							array[i] = data.NewNumberFromFloat(num)
+							uploadingDataArray[i] = num
+						default:
+							return fmt.Errorf("invalid number value: %v", val)
+						}
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx] = data.NewNumberFromFloat(val.GetNumberValue())
+					uploadingDataArray := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_NumberValue); !ok {
+							return fmt.Errorf("%w: invalid number value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i] = data.NewNumberFromFloat(val.GetNumberValue())
+						uploadingDataArray[i] = val.GetNumberValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = uploadingDataArray
 				}
 			case "image", "image/*":
 				if v == nil {
-					variable[k], err = data.NewImageFromURL(defaultValueMap[k].(string))
+					variable[k], err = data.NewImageFromURL(ctx, s.binaryFetcher, defaultValueMap[k].(string), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
-					variable[k], err = data.NewImageFromURL(v.GetStringValue())
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
+					variable[k], err = data.NewImageFromURL(ctx, s.binaryFetcher, v.GetStringValue(), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:image", "array:image/*":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx], err = data.NewImageFromURL(val.(string))
+					arrayWithURL := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i], err = data.NewImageFromURL(ctx, s.binaryFetcher, val.(string), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx], err = data.NewImageFromURL(val.GetStringValue())
+					arrayWithURL := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i], err = data.NewImageFromURL(ctx, s.binaryFetcher, val.GetStringValue(), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				}
 			case "audio", "audio/*":
 				if v == nil {
-					variable[k], err = data.NewAudioFromURL(defaultValueMap[k].(string))
+					variable[k], err = data.NewAudioFromURL(ctx, s.binaryFetcher, defaultValueMap[k].(string), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
-					variable[k], err = data.NewAudioFromURL(v.GetStringValue())
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
+					variable[k], err = data.NewAudioFromURL(ctx, s.binaryFetcher, v.GetStringValue(), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:audio", "array:audio/*":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx], err = data.NewAudioFromURL(val.(string))
+					arrayWithURL := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i], err = data.NewAudioFromURL(ctx, s.binaryFetcher, val.(string), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx], err = data.NewAudioFromURL(val.GetStringValue())
+					arrayWithURL := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i], err = data.NewAudioFromURL(ctx, s.binaryFetcher, val.GetStringValue(), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				}
 			case "video", "video/*":
 				if v == nil {
-					variable[k], err = data.NewVideoFromURL(defaultValueMap[k].(string))
+					variable[k], err = data.NewVideoFromURL(ctx, s.binaryFetcher, defaultValueMap[k].(string), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
-					variable[k], err = data.NewVideoFromURL(v.GetStringValue())
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
+					variable[k], err = data.NewVideoFromURL(ctx, s.binaryFetcher, v.GetStringValue(), false)
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:video", "array:video/*":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx], err = data.NewVideoFromURL(val.(string))
+					arrayWithURL := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i], err = data.NewVideoFromURL(ctx, s.binaryFetcher, val.(string), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx], err = data.NewVideoFromURL(val.GetStringValue())
+					arrayWithURL := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i], err = data.NewVideoFromURL(ctx, s.binaryFetcher, val.GetStringValue(), false)
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				}
 
 			case "document":
 				if v == nil {
-					variable[k], err = data.NewDocumentFromURL(defaultValueMap[k].(string))
+					variable[k], err = data.NewDocumentFromURL(ctx, s.binaryFetcher, defaultValueMap[k].(string))
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
-					variable[k], err = data.NewDocumentFromURL(v.GetStringValue())
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
+					variable[k], err = data.NewDocumentFromURL(ctx, s.binaryFetcher, v.GetStringValue())
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:document":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx], err = data.NewDocumentFromURL(val.(string))
+					arrayWithURL := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i], err = data.NewDocumentFromURL(ctx, s.binaryFetcher, val.(string))
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx], err = data.NewDocumentFromURL(val.GetStringValue())
+					arrayWithURL := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i], err = data.NewDocumentFromURL(ctx, s.binaryFetcher, val.GetStringValue())
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				}
 			case "file", "*/*":
 				if v == nil {
-					variable[k], err = data.NewBinaryFromURL(defaultValueMap[k].(string))
+					variable[k], err = data.NewBinaryFromURL(ctx, s.binaryFetcher, defaultValueMap[k].(string))
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = defaultValueMap[k].(string)
 				} else {
-					variable[k], err = data.NewBinaryFromURL(v.GetStringValue())
+					if _, ok := v.Kind.(*structpb.Value_StringValue); !ok {
+						return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, v)
+					}
+					variable[k], err = data.NewBinaryFromURL(ctx, s.binaryFetcher, v.GetStringValue())
 					if err != nil {
 						return err
 					}
+					uploadingPipelineData[idx][k] = v.GetStringValue()
 				}
 			case "array:file", "array:*/*":
 				if v == nil {
 					array := make(data.Array, len(defaultValueMap[k].([]any)))
-					for idx, val := range defaultValueMap[k].([]any) {
-						array[idx], err = data.NewBinaryFromURL(val.(string))
+					arrayWithURL := make([]any, len(defaultValueMap[k].([]any)))
+					for i, val := range defaultValueMap[k].([]any) {
+						array[i], err = data.NewBinaryFromURL(ctx, s.binaryFetcher, val.(string))
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.(string)
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				} else {
 					array := make(data.Array, len(v.GetListValue().Values))
-					for idx, val := range v.GetListValue().Values {
-						array[idx], err = data.NewBinaryFromURL(val.GetStringValue())
+					arrayWithURL := make([]any, len(v.GetListValue().Values))
+					for i, val := range v.GetListValue().Values {
+						if _, ok := val.Kind.(*structpb.Value_StringValue); !ok {
+							return fmt.Errorf("%w: invalid string value: %v", errorsx.ErrInvalidArgument, val)
+						}
+						array[i], err = data.NewBinaryFromURL(ctx, s.binaryFetcher, val.GetStringValue())
 						if err != nil {
 							return err
 						}
+						arrayWithURL[i] = val.GetStringValue()
 					}
 					variable[k] = array
+					uploadingPipelineData[idx][k] = arrayWithURL
 				}
 			case "semi-structured/*", "semi-structured/json", "json":
-
 				if v == nil {
 					jv, err := data.NewJSONValue(defaultValueMap[k])
 					if err != nil {
 						return err
 					}
 					variable[k] = jv
+					uploadingPipelineData[idx][k] = jv
 				} else {
-					switch v.Kind.(type) {
-					case *structpb.Value_StructValue:
-						j := map[string]any{}
-						b, err := protojson.Marshal(v)
-						if err != nil {
-							return err
-						}
-						err = json.Unmarshal(b, &j)
-						if err != nil {
-							return err
-						}
-						jv, err := data.NewJSONValue(j)
-						if err != nil {
-							return err
-						}
-						variable[k] = jv
-					case *structpb.Value_ListValue:
-						j := []any{}
-						b, err := protojson.Marshal(v)
-						if err != nil {
-							return err
-						}
-						err = json.Unmarshal(b, &j)
-						if err != nil {
-							return err
-						}
-						jv, err := data.NewJSONValue(j)
-						if err != nil {
-							return err
-						}
-						variable[k] = jv
+					jv, err := data.NewJSONValue(v.AsInterface())
+					if err != nil {
+						return err
 					}
+					variable[k] = jv
+					uploadingPipelineData[idx][k] = jv
 				}
 
 			}
+
 			if err != nil {
 				return err
 			}
 		}
+
 		err = wfm.Set(ctx, idx, constant.SegVariable, variable)
 		if err != nil {
 			return err
 		}
 
+		// Each batch may overwrite the secret and connection references in the
+		// recipe by providing a new value (secret) or reference (connection)
+		// in the trigger data. For secrets, the value will be read from the
+		// trigger data instead of from the namespace's secrets. In the case of
+		// connections, this works as aliasing an existing connection with the
+		// ID defined in the recipe.
+		//
+		// This is useful for parametrizing pipeline triggers and for
+		// triggering pipelines owned by other namespaces (which might
+		// reference secrets or connections that exist in their namespaces).
 		secret := data.Map{}
 		for k, v := range d.Secret {
 			secret[k] = data.NewString(v)
@@ -1086,11 +1396,30 @@ func (s *service) preTriggerPipeline(ctx context.Context, ns resource.Namespace,
 			return err
 		}
 
+		connRefs := data.Map{}
+		for k, v := range d.ConnectionReferences {
+			connRefs[k] = data.NewString(v)
+		}
+
+		err = wfm.Set(ctx, idx, constant.SegConnection, connRefs)
+		if err != nil {
+			return err
+		}
 	}
-	isStreaming := resource.GetRequestSingleHeader(ctx, constant.HeaderAccept) == "text/event-stream"
-	if isStreaming {
-		wfm.EnableStreaming()
+
+	_, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	if err := s.memory.CommitWorkflowData(ctx, userUID, wfm); err != nil {
+		return fmt.Errorf("storing workflow data: %w", err)
 	}
+
+	if err := s.uploadPipelineRunInputsToMinio(ctx, uploadPipelineRunInputsToMinioParam{
+		pipelineTriggerID: pipelineTriggerID,
+		expiryRule:        expiryRule,
+		pipelineData:      uploadingPipelineData,
+	}); err != nil {
+		return fmt.Errorf("uploading pipeline run inputs to minio: %w", err)
+	}
+
 	return nil
 }
 
@@ -1100,19 +1429,19 @@ func (s *service) CreateNamespacePipelineRelease(ctx context.Context, ns resourc
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, false, false)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	dbPipelineReleaseToCreate, err := s.converter.ConvertPipelineReleaseToDB(ctx, pipelineUID, pipelineRelease)
@@ -1120,8 +1449,13 @@ func (s *service) CreateNamespacePipelineRelease(ctx context.Context, ns resourc
 		return nil, err
 	}
 
-	dbPipelineReleaseToCreate.RecipeYAML = dbPipeline.RecipeYAML
-	dbPipelineReleaseToCreate.Metadata = dbPipeline.Metadata
+	if dbPipelineReleaseToCreate.RecipeYAML == "" {
+		dbPipelineReleaseToCreate.RecipeYAML = dbPipeline.RecipeYAML
+	}
+
+	if dbPipelineReleaseToCreate.Metadata == nil {
+		dbPipelineReleaseToCreate.Metadata = dbPipeline.Metadata
+	}
 
 	if err := s.repository.CreateNamespacePipelineRelease(ctx, ownerPermalink, pipelineUID, dbPipelineReleaseToCreate); err != nil {
 		return nil, err
@@ -1129,6 +1463,15 @@ func (s *service) CreateNamespacePipelineRelease(ctx context.Context, ns resourc
 
 	dbCreatedPipelineRelease, err := s.repository.GetNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, pipelineRelease.Id, false)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := s.configureRunOn(ctx, configureRunOnParams{
+		Namespace:   ns,
+		pipelineUID: dbPipeline.UID,
+		releaseUID:  dbCreatedPipelineRelease.UID,
+		recipe:      dbCreatedPipelineRelease.Recipe,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -1141,12 +1484,12 @@ func (s *service) ListNamespacePipelineReleases(ctx context.Context, ns resource
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, true, false)
 	if err != nil {
-		return nil, 0, "", errdomain.ErrNotFound
+		return nil, 0, "", errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, 0, "", err
 	} else if !granted {
-		return nil, 0, "", errdomain.ErrNotFound
+		return nil, 0, "", errorsx.ErrNotFound
 	}
 
 	dbPipelineReleases, ps, pt, err := s.repository.ListNamespacePipelineReleases(ctx, ownerPermalink, pipelineUID, int64(pageSize), pageToken, view <= pipelinepb.Pipeline_VIEW_BASIC, filter, showDeleted, true)
@@ -1164,12 +1507,12 @@ func (s *service) GetNamespacePipelineReleaseByID(ctx context.Context, ns resour
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, true, false)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	dbPipelineRelease, err := s.repository.GetNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, id, view <= pipelinepb.Pipeline_VIEW_BASIC)
@@ -1187,18 +1530,18 @@ func (s *service) UpdateNamespacePipelineReleaseByID(ctx context.Context, ns res
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, true, false)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	if _, err := s.GetNamespacePipelineReleaseByID(ctx, ns, pipelineUID, id, pipelinepb.Pipeline_VIEW_BASIC); err != nil {
@@ -1227,18 +1570,18 @@ func (s *service) UpdateNamespacePipelineReleaseIDByID(ctx context.Context, ns r
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, true, false)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return nil, err
 	} else if !granted {
-		return nil, errdomain.ErrUnauthorized
+		return nil, errorsx.ErrUnauthorized
 	}
 
 	// Validation: Pipeline existence
@@ -1265,18 +1608,18 @@ func (s *service) DeleteNamespacePipelineReleaseByID(ctx context.Context, ns res
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, true, false)
 	if err != nil {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "reader"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", dbPipeline.UID, "admin"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrUnauthorized
+		return errorsx.ErrUnauthorized
 	}
 
 	return s.repository.DeleteNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, id)
@@ -1287,18 +1630,18 @@ func (s *service) RestoreNamespacePipelineReleaseByID(ctx context.Context, ns re
 
 	pipeline, err := s.GetPipelineByUID(ctx, pipelineUID, pipelinepb.Pipeline_VIEW_BASIC)
 	if err != nil {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", uuid.FromStringOrNil(pipeline.GetUid()), "admin"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", uuid.FromStringOrNil(pipeline.GetUid()), "admin"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrUnauthorized
+		return errorsx.ErrUnauthorized
 	}
 
 	dbPipelineRelease, err := s.repository.GetNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, id, false)
@@ -1308,13 +1651,13 @@ func (s *service) RestoreNamespacePipelineReleaseByID(ctx context.Context, ns re
 
 	var existingPipeline *datamodel.Pipeline
 	// Validation: Pipeline existence
-	if existingPipeline, err = s.repository.GetPipelineByUIDAdmin(ctx, pipelineUID, false, true); err != nil {
+	if existingPipeline, err = s.repository.GetPipelineByUID(ctx, pipelineUID, false, true); err != nil {
 		return err
 	}
 	existingPipeline.Recipe = dbPipelineRelease.Recipe
 
 	if err := s.repository.UpdateNamespacePipelineByUID(ctx, existingPipeline.UID, existingPipeline); err != nil {
-		return err
+		return fmt.Errorf("updating pipeline: %w", err)
 	}
 
 	return nil
@@ -1323,28 +1666,17 @@ func (s *service) RestoreNamespacePipelineReleaseByID(ctx context.Context, ns re
 // TODO: share the code with worker/workflow.go
 func (s *service) triggerPipeline(
 	ctx context.Context,
-	ns resource.Namespace,
-	r *datamodel.Recipe,
-	pipelineID string,
-	pipelineUID uuid.UUID,
-	pipelineReleaseID string,
-	pipelineReleaseUID uuid.UUID,
-	pipelineData []*pipelinepb.TriggerData,
-	pipelineTriggerID string,
+	triggerParams triggerParams,
 	returnTraces bool) ([]*structpb.Struct, *pipelinepb.TriggerMetadata, error) {
 
-	logger, _ := logger.GetZapLogger(ctx)
+	logger, _ := logx.GetZapLogger(ctx)
 
 	defer func() {
-		_ = s.memory.PurgeWorkflowMemory(ctx, pipelineTriggerID)
+		_ = s.memory.CleanupWorkflowMemory(context.Background(), triggerParams.userUID, triggerParams.pipelineTriggerID)
 	}()
-	err := s.preTriggerPipeline(ctx, ns, r, pipelineTriggerID, pipelineData)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       pipelineTriggerID,
+		ID:                       triggerParams.pipelineTriggerID,
 		TaskQueue:                worker.TaskQueue,
 		WorkflowExecutionTimeout: time.Duration(config.Config.Server.Workflow.MaxWorkflowTimeout) * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -1352,34 +1684,49 @@ func (s *service) triggerPipeline(
 		},
 	}
 
-	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
-
-	expiryRuleTag, err := s.retentionHandler.GetExpiryTagBySubscriptionPlan(ctx, requesterUID)
+	requester, err := s.GetNamespaceByUID(ctx, triggerParams.requesterUID)
+	if err != nil {
+		return nil, nil, err
+	}
+	user, err := s.GetNamespaceByUID(ctx, triggerParams.userUID)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	isStreaming := resourcex.GetRequestSingleHeader(ctx, constant.HeaderAccept) == "text/event-stream"
+
 	we, err := s.temporalClient.ExecuteWorkflow(
-		ctx,
+		temporalx.PropagateMetadata(ctx),
 		workflowOptions,
 		"TriggerPipelineWorkflow",
 		&worker.TriggerPipelineWorkflowParam{
-			TriggerFromAPI: true,
 			SystemVariables: recipe.SystemVariables{
-				PipelineTriggerID:    pipelineTriggerID,
-				PipelineID:           pipelineID,
-				PipelineUID:          pipelineUID,
-				PipelineReleaseID:    pipelineReleaseID,
-				PipelineReleaseUID:   pipelineReleaseUID,
-				PipelineOwnerType:    ns.NsType,
-				PipelineOwnerUID:     ns.NsUID,
-				PipelineUserUID:      uuid.FromStringOrNil(userUID),
-				PipelineRequesterUID: uuid.FromStringOrNil(requesterUID),
-				HeaderAuthorization:  resource.GetRequestSingleHeader(ctx, "authorization"),
-				ExpiryRuleTag:        expiryRuleTag,
+				PipelineTriggerID:    triggerParams.pipelineTriggerID,
+				PipelineID:           triggerParams.pipelineID,
+				PipelineUID:          triggerParams.pipelineUID,
+				PipelineReleaseID:    triggerParams.pipelineReleaseID,
+				PipelineReleaseUID:   triggerParams.pipelineReleaseUID,
+				PipelineOwner:        triggerParams.ns,
+				PipelineUserUID:      user.NsUID,
+				PipelineRequesterUID: requester.NsUID,
+				PipelineRequesterID:  requester.NsID,
+				HeaderAuthorization:  resourcex.GetRequestSingleHeader(ctx, "authorization"),
+				OriginalHeader: func() map[string]string {
+					md, ok := metadata.FromIncomingContext(ctx)
+					if !ok {
+						return nil
+					}
+					header := make(map[string]string)
+					for k, v := range md {
+						header[k] = v[0]
+					}
+					return header
+				}(),
+				ExpiryRule: triggerParams.expiryRule,
 			},
+			Streaming: isStreaming,
 			Mode:      mgmtpb.Mode_MODE_SYNC,
-			WorkerUID: s.workerUID,
+			Recipe:    triggerParams.recipe,
 		})
 	if err != nil {
 		logger.Error(fmt.Sprintf("unable to execute workflow: %s", err.Error()))
@@ -1391,47 +1738,39 @@ func (s *service) triggerPipeline(
 		// and mark the code as 400 InvalidArgument for now.
 		// We should further categorize them into InvalidArgument or
 		// PreconditionFailed or InternalError in the future.
-		err = fmt.Errorf("%w:%w", ErrTriggerFail, err)
+		err = fmt.Errorf("%w:%w", errorsx.ErrTriggerFail, err)
 
 		var applicationErr *temporal.ApplicationError
 		if errors.As(err, &applicationErr) && applicationErr.Message() != "" {
-			err = errmsg.AddMessage(err, applicationErr.Message())
+			err = errorsx.AddMessage(err, applicationErr.Message())
 		}
 
 		return nil, nil, err
 	}
 
-	return s.getOutputsAndMetadata(ctx, pipelineTriggerID, returnTraces)
+	compIDs := slices.Collect(maps.Keys(triggerParams.recipe.Component))
+	return s.getOutputsAndMetadata(ctx, triggerParams.userUID, triggerParams.pipelineTriggerID, compIDs, returnTraces)
 }
 
-func (s *service) triggerAsyncPipeline(
-	ctx context.Context,
-	ns resource.Namespace,
-	r *datamodel.Recipe,
-	pipelineID string,
-	pipelineUID uuid.UUID,
-	pipelineReleaseID string,
-	pipelineReleaseUID uuid.UUID,
-	pipelineData []*pipelinepb.TriggerData,
-	pipelineTriggerID string,
-	returnTraces bool) (*longrunningpb.Operation, error) {
+type triggerParams struct {
+	ns                 resource.Namespace
+	pipelineID         string
+	pipelineUID        uuid.UUID
+	pipelineReleaseID  string
+	pipelineReleaseUID uuid.UUID
+	pipelineTriggerID  string
+	requesterUID       uuid.UUID
+	userUID            uuid.UUID
+	expiryRule         minio.ExpiryRule
+	recipe             *datamodel.Recipe
+}
 
-	defer func() {
-		go func() {
-			// We only retain the memory for a maximum of 60 minutes.
-			time.Sleep(60 * time.Minute)
-			_ = s.memory.PurgeWorkflowMemory(ctx, pipelineTriggerID)
-		}()
-	}()
-	err := s.preTriggerPipeline(ctx, ns, r, pipelineTriggerID, pipelineData)
-	if err != nil {
-		return nil, err
-	}
-
-	logger, _ := logger.GetZapLogger(ctx)
+func (s *service) triggerAsyncPipeline(ctx context.Context, params triggerParams) (*longrunningpb.Operation, error) {
+	logger, _ := logx.GetZapLogger(ctx)
+	logger.Info("triggerAsyncPipeline", zap.String("triggerID", params.pipelineTriggerID))
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       pipelineTriggerID,
+		ID:                       params.pipelineTriggerID,
 		TaskQueue:                worker.TaskQueue,
 		WorkflowExecutionTimeout: time.Duration(config.Config.Server.Workflow.MaxWorkflowTimeout) * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -1439,34 +1778,62 @@ func (s *service) triggerAsyncPipeline(
 		},
 	}
 
-	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	cleanupOptions := workflowOptions
+	cleanupOptions.ID = "cleanupMemory:" + params.pipelineTriggerID
 
-	expiryRuleTag, err := s.retentionHandler.GetExpiryTagBySubscriptionPlan(ctx, requesterUID)
+	// We only retain the memory for a maximum of 60 minutes. This should be
+	// enough to allow clients to fetch the result via the long-running
+	// operation endpoint.
+	cleanupOptions.StartDelay = 1 * time.Hour
+
+	// We're using a delayed start but the timeout will start to count from the
+	// execution is created.
+	cleanupOptions.WorkflowExecutionTimeout = cleanupOptions.StartDelay + cleanupOptions.WorkflowExecutionTimeout
+
+	_, err := s.temporalClient.ExecuteWorkflow(ctx, cleanupOptions, "CleanupMemoryWorkflow", params.userUID, params.pipelineTriggerID)
+	if err != nil {
+		return nil, fmt.Errorf("launching cleanup workflow: %w", err)
+	}
+
+	requester, err := s.GetNamespaceByUID(ctx, params.requesterUID)
 	if err != nil {
 		return nil, err
 	}
 
+	isStreaming := resourcex.GetRequestSingleHeader(ctx, constant.HeaderAccept) == "text/event-stream"
+
 	we, err := s.temporalClient.ExecuteWorkflow(
-		ctx,
+		temporalx.PropagateMetadata(ctx),
 		workflowOptions,
 		"TriggerPipelineWorkflow",
 		&worker.TriggerPipelineWorkflowParam{
 			SystemVariables: recipe.SystemVariables{
-				PipelineTriggerID:    pipelineTriggerID,
-				PipelineID:           pipelineID,
-				PipelineUID:          pipelineUID,
-				PipelineReleaseID:    pipelineReleaseID,
-				PipelineReleaseUID:   pipelineReleaseUID,
-				PipelineOwnerType:    ns.NsType,
-				PipelineOwnerUID:     ns.NsUID,
-				PipelineUserUID:      uuid.FromStringOrNil(userUID),
-				PipelineRequesterUID: uuid.FromStringOrNil(requesterUID),
-				HeaderAuthorization:  resource.GetRequestSingleHeader(ctx, "authorization"),
-				ExpiryRuleTag:        expiryRuleTag,
+				PipelineTriggerID:    params.pipelineTriggerID,
+				PipelineID:           params.pipelineID,
+				PipelineUID:          params.pipelineUID,
+				PipelineReleaseID:    params.pipelineReleaseID,
+				PipelineReleaseUID:   params.pipelineReleaseUID,
+				PipelineOwner:        params.ns,
+				PipelineUserUID:      params.userUID,
+				PipelineRequesterUID: requester.NsUID,
+				PipelineRequesterID:  requester.NsID,
+				HeaderAuthorization:  resourcex.GetRequestSingleHeader(ctx, "authorization"),
+				OriginalHeader: func() map[string]string {
+					md, ok := metadata.FromIncomingContext(ctx)
+					if !ok {
+						return nil
+					}
+					header := make(map[string]string)
+					for k, v := range md {
+						header[k] = v[0]
+					}
+					return header
+				}(),
+				ExpiryRule: params.expiryRule,
 			},
-			Mode:           mgmtpb.Mode_MODE_ASYNC,
-			TriggerFromAPI: true,
-			WorkerUID:      s.workerUID,
+			Streaming: isStreaming,
+			Mode:      mgmtpb.Mode_MODE_ASYNC,
+			Recipe:    params.recipe,
 		})
 	if err != nil {
 		logger.Error(fmt.Sprintf("unable to execute workflow: %s", err.Error()))
@@ -1481,41 +1848,35 @@ func (s *service) triggerAsyncPipeline(
 
 		err = we.Get(subCtx, nil)
 		if err != nil {
-			err = fmt.Errorf("%w:%w", ErrTriggerFail, err)
+			err = fmt.Errorf("%w:%w", errorsx.ErrTriggerFail, err)
 
 			var applicationErr *temporal.ApplicationError
 			if errors.As(err, &applicationErr) && applicationErr.Message() != "" {
-				err = errmsg.AddMessage(err, applicationErr.Message())
+				err = errorsx.AddMessage(err, applicationErr.Message())
 			}
 			logger.Error(fmt.Sprintf("unable to execute workflow: %s", err.Error()))
 
-			run, repoErr := s.repository.GetPipelineRunByUID(subCtx, uuid.FromStringOrNil(pipelineTriggerID))
-			if repoErr != nil {
-				logger.Error("failed to log pipeline run error", zap.Error(err), zap.Error(repoErr))
-				return
-			}
-
-			s.logPipelineRunError(subCtx, pipelineTriggerID, err, run.StartedTime)
+			s.logPipelineRunError(subCtx, params.pipelineTriggerID, err)
 			return
 		}
 	})
 
 	return &longrunningpb.Operation{
-		Name: fmt.Sprintf("operations/%s", pipelineTriggerID),
+		Name: fmt.Sprintf("operations/%s", params.pipelineTriggerID),
 		Done: false,
 	}, nil
 
 }
 
-func (s *service) getOutputsAndMetadata(ctx context.Context, pipelineTriggerID string, returnTraces bool) ([]*structpb.Struct, *pipelinepb.TriggerMetadata, error) {
-
-	wfm, err := s.memory.GetWorkflowMemory(ctx, pipelineTriggerID)
+func (s *service) getOutputsAndMetadata(ctx context.Context, userUID uuid.UUID, pipelineTriggerID string, compIDs []string, returnTraces bool) ([]*structpb.Struct, *pipelinepb.TriggerMetadata, error) {
+	wfm, err := s.memory.FetchWorkflowMemory(ctx, userUID, pipelineTriggerID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("fetching workflow memory: %w", err)
 	}
 
-	pipelineOutputs := make([]*structpb.Struct, wfm.GetBatchSize())
+	defer s.memory.PurgeWorkflowMemory(pipelineTriggerID)
 
+	pipelineOutputs := make([]*structpb.Struct, wfm.GetBatchSize())
 	for idx := range wfm.GetBatchSize() {
 		output, err := wfm.Get(ctx, idx, constant.SegOutput)
 		if err != nil {
@@ -1530,7 +1891,7 @@ func (s *service) getOutputsAndMetadata(ctx context.Context, pipelineTriggerID s
 
 	var metadata *pipelinepb.TriggerMetadata
 
-	traces, err := recipe.GenerateTraces(ctx, wfm, returnTraces)
+	traces, err := recipe.GenerateTraces(ctx, compIDs, wfm, returnTraces)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1544,14 +1905,14 @@ func (s *service) getOutputsAndMetadata(ctx context.Context, pipelineTriggerID s
 // checkRequesterPermission validates that the authenticated user can make
 // requests on behalf of the resource identified by the requester UID.
 func (s *service) checkRequesterPermission(ctx context.Context, pipeline *datamodel.Pipeline) error {
-	authType := resource.GetRequestSingleHeader(ctx, constant.HeaderAuthTypeKey)
+	authType := resourcex.GetRequestSingleHeader(ctx, constantx.HeaderAuthTypeKey)
 	if authType != "user" {
 		// Only authenticated users can switch namespaces.
-		return errdomain.ErrUnauthorized
+		return errorsx.ErrUnauthorized
 	}
 
-	requester := resource.GetRequestSingleHeader(ctx, constant.HeaderRequesterUIDKey)
-	authenticatedUser := resource.GetRequestSingleHeader(ctx, constant.HeaderUserUIDKey)
+	requester := resourcex.GetRequestSingleHeader(ctx, constantx.HeaderRequesterUIDKey)
+	authenticatedUser := resourcex.GetRequestSingleHeader(ctx, constantx.HeaderUserUIDKey)
 	if requester == "" || authenticatedUser == requester {
 		// Request doesn't contain impersonation.
 		return nil
@@ -1561,14 +1922,14 @@ func (s *service) checkRequesterPermission(ctx context.Context, pipeline *datamo
 	// organization namespace.
 	isMember, err := s.aclClient.CheckPermission(ctx, "organization", uuid.FromStringOrNil(requester), "member")
 	if err != nil {
-		return errmsg.AddMessage(
+		return errorsx.AddMessage(
 			fmt.Errorf("checking organization membership: %w", err),
 			"Couldn't check organization membership.",
 		)
 	}
 
 	if !isMember {
-		return fmt.Errorf("authenticated user doesn't belong to requester organization: %w", errdomain.ErrUnauthorized)
+		return fmt.Errorf("authenticated user doesn't belong to requester organization: %w", errorsx.ErrUnauthorized)
 	}
 
 	if pipeline.IsPublic() {
@@ -1585,14 +1946,14 @@ func (s *service) checkRequesterPermission(ctx context.Context, pipeline *datamo
 	// shareable link.
 	canTrigger, err := s.aclClient.CheckLinkPermission(ctx, "pipeline", pipeline.UID, "executor")
 	if err != nil {
-		return errmsg.AddMessage(
+		return errorsx.AddMessage(
 			fmt.Errorf("checking shareable link permissions: %w", err),
 			"Couldn't validate shareable link.",
 		)
 	}
 
 	if !canTrigger {
-		return fmt.Errorf("organization can't trigger private external pipeline: %w", errdomain.ErrUnauthorized)
+		return fmt.Errorf("organization can't trigger private external pipeline: %w", errorsx.ErrUnauthorized)
 	}
 
 	return nil
@@ -1602,13 +1963,13 @@ func (s *service) checkTriggerPermission(ctx context.Context, pipeline *datamode
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", pipeline.UID, "reader"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrNotFound
+		return errorsx.ErrNotFound
 	}
 
 	if granted, err := s.aclClient.CheckPermission(ctx, "pipeline", pipeline.UID, "executor"); err != nil {
 		return err
 	} else if !granted {
-		return errdomain.ErrUnauthorized
+		return errorsx.ErrUnauthorized
 	}
 
 	// For now, impersonation is only implemented for pipeline triggers. When
@@ -1620,113 +1981,36 @@ func (s *service) checkTriggerPermission(ctx context.Context, pipeline *datamode
 	return nil
 }
 
-func (s *service) CheckPipelineEventCode(ctx context.Context, ns resource.Namespace, id string, code string) (bool, error) {
-	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ns.Permalink(), id, false, true)
-	if err != nil {
-		return false, errdomain.ErrNotFound
-	}
-
-	return dbPipeline.ShareCode == code, nil
-}
-
-func (s *service) HandleNamespacePipelineEventByID(ctx context.Context, ns resource.Namespace, id string, eventID string, data *structpb.Struct, pipelineTriggerID string) (*structpb.Struct, error) {
-
-	var targetType string
-	ownerPermalink := ns.Permalink()
-	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, true)
-	if err != nil {
-		return nil, errdomain.ErrNotFound
-	}
-
-	// TODO: In the webhook event, the request is sent by a system user, not an
-	// end user. It doesn't include the user UID or requester UID. For now,
-	// we'll use the namespace as the user ID and requester UID.
-	// A proper authentication mechanism for system users needs to be designed.
-	md, _ := metadata.FromIncomingContext(ctx)
-	md.Set(constant.HeaderUserUIDKey, ns.NsUID.String())
-	md.Set(constant.HeaderRequesterUIDKey, ns.NsUID.String())
-	ctx = metadata.NewIncomingContext(ctx, md)
-
-	pipelineRun := s.logPipelineRunStart(ctx, pipelineTriggerID, dbPipeline.UID, defaultPipelineReleaseID)
-	defer func() {
-		if err != nil {
-			s.logPipelineRunError(ctx, pipelineTriggerID, err, pipelineRun.StartedTime)
-		}
-	}()
-
-	if e, ok := dbPipeline.Recipe.On.Event[eventID]; ok {
-
-		targetType = e.Type
-	} else {
-		return nil, fmt.Errorf("eventID not correct")
-	}
-
-	isVerificationEvent, out, err := s.component.HandleVerificationEvent(targetType, md, data, nil)
-	if err != nil {
-		return nil, err
-	}
-	if isVerificationEvent {
-		return out, nil
-	}
-
-	d := pipelinepb.TriggerData{
-		Variable: &structpb.Struct{Fields: make(map[string]*structpb.Value)},
-	}
-
-	jsonInput := map[string]any{}
-	b, err := protojson.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	err = json.Unmarshal(b, &jsonInput)
-	if err != nil {
-		return nil, err
-	}
-
-	for key, v := range dbPipeline.Recipe.Variable {
-		for _, l := range v.Listen {
-			l := l[2 : len(l)-1]
-			s := strings.Split(l, ".")
-			if s[0] != "on" || s[1] != "event" {
-				return nil, fmt.Errorf("cannot listen to data outside of `on.event`")
-			}
-			if eventID == s[2] {
-				path := strings.Join(s[4:], ".")
-				res, err := jsonpath.Get(fmt.Sprintf("$.%s", path), jsonInput)
-				if err != nil {
-					return nil, err
-				}
-				d.Variable.Fields[key], err = structpb.NewValue(res)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-
-	triggerData := []*pipelinepb.TriggerData{&d}
-
-	_, err = s.triggerAsyncPipeline(ctx, ns, dbPipeline.Recipe, dbPipeline.ID, dbPipeline.UID, "", uuid.Nil, triggerData, pipelineTriggerID, false)
-	if err != nil {
-		return nil, err
-	}
-
-	return out, nil
-}
-
 func (s *service) TriggerNamespacePipelineByID(ctx context.Context, ns resource.Namespace, id string, data []*pipelinepb.TriggerData, pipelineTriggerID string, returnTraces bool) ([]*structpb.Struct, *pipelinepb.TriggerMetadata, error) {
 	ownerPermalink := ns.Permalink()
 
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, true)
 	if err != nil {
-		return nil, nil, errdomain.ErrNotFound
+		return nil, nil, errorsx.ErrNotFound
 	}
+
+	if dbPipeline.Recipe == nil {
+		return nil, nil, fmt.Errorf("pipeline must have a valid recipe in order to be triggered")
+	}
+
 	pipelineUID := dbPipeline.UID
 
-	pipelineRun := s.logPipelineRunStart(ctx, pipelineTriggerID, pipelineUID, defaultPipelineReleaseID)
+	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requester, err := s.GetNamespaceByUID(ctx, requesterUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetching requester namespace: %w", err)
+	}
+
+	_ = s.logPipelineRunStart(ctx, logPipelineRunStartParams{
+		pipelineTriggerID: pipelineTriggerID,
+		pipelineUID:       pipelineUID,
+		pipelineReleaseID: defaultPipelineReleaseID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+	})
 	defer func() {
 		if err != nil {
-			s.logPipelineRunError(ctx, pipelineTriggerID, err, pipelineRun.StartedTime)
+			s.logPipelineRunError(ctx, pipelineTriggerID, err)
 		}
 	}()
 
@@ -1734,7 +2018,26 @@ func (s *service) TriggerNamespacePipelineByID(ctx context.Context, ns resource.
 		return nil, nil, fmt.Errorf("check trigger permission error: %w", err)
 	}
 
-	outputs, triggerMetadata, err := s.triggerPipeline(ctx, ns, dbPipeline.Recipe, dbPipeline.ID, pipelineUID, "", uuid.Nil, data, pipelineTriggerID, returnTraces)
+	expiryRule, err := s.retentionHandler.GetExpiryRuleByNamespace(ctx, requesterUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("accessing expiry rule: %w", err)
+	}
+
+	err = s.preTriggerPipeline(ctx, requester, dbPipeline.Recipe, pipelineTriggerID, data, expiryRule)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	outputs, triggerMetadata, err := s.triggerPipeline(ctx, triggerParams{
+		ns:                ns,
+		pipelineID:        dbPipeline.ID,
+		pipelineUID:       pipelineUID,
+		pipelineTriggerID: pipelineTriggerID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+		expiryRule:        expiryRule,
+		recipe:            dbPipeline.Recipe,
+	}, returnTraces)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1747,13 +2050,25 @@ func (s *service) TriggerAsyncNamespacePipelineByID(ctx context.Context, ns reso
 
 	dbPipeline, err := s.repository.GetNamespacePipelineByID(ctx, ownerPermalink, id, false, true)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
 	}
 
-	pipelineRun := s.logPipelineRunStart(ctx, pipelineTriggerID, dbPipeline.UID, defaultPipelineReleaseID)
+	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requester, err := s.GetNamespaceByUID(ctx, requesterUID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching requester namespace: %w", err)
+	}
+
+	_ = s.logPipelineRunStart(ctx, logPipelineRunStartParams{
+		pipelineTriggerID: pipelineTriggerID,
+		pipelineUID:       dbPipeline.UID,
+		pipelineReleaseID: defaultPipelineReleaseID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+	})
 	defer func() {
 		if err != nil {
-			s.logPipelineRunError(ctx, pipelineTriggerID, err, pipelineRun.StartedTime)
+			s.logPipelineRunError(ctx, pipelineTriggerID, err)
 		}
 	}()
 
@@ -1761,7 +2076,25 @@ func (s *service) TriggerAsyncNamespacePipelineByID(ctx context.Context, ns reso
 		return nil, err
 	}
 
-	operation, err := s.triggerAsyncPipeline(ctx, ns, dbPipeline.Recipe, dbPipeline.ID, dbPipeline.UID, "", uuid.Nil, data, pipelineTriggerID, returnTraces)
+	expiryRule, err := s.retentionHandler.GetExpiryRuleByNamespace(ctx, requesterUID)
+	if err != nil {
+		return nil, fmt.Errorf("accessing expiry rule: %w", err)
+	}
+
+	err = s.preTriggerPipeline(ctx, requester, dbPipeline.Recipe, pipelineTriggerID, data, expiryRule)
+	if err != nil {
+		return nil, err
+	}
+	operation, err := s.triggerAsyncPipeline(ctx, triggerParams{
+		ns:                ns,
+		pipelineID:        dbPipeline.ID,
+		pipelineUID:       dbPipeline.UID,
+		pipelineTriggerID: pipelineTriggerID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+		expiryRule:        expiryRule,
+		recipe:            dbPipeline.Recipe,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1775,7 +2108,12 @@ func (s *service) TriggerNamespacePipelineReleaseByID(ctx context.Context, ns re
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, false, true)
 	if err != nil {
-		return nil, nil, errdomain.ErrNotFound
+		return nil, nil, errorsx.ErrNotFound
+	}
+	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requester, err := s.GetNamespaceByUID(ctx, requesterUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetching requester namespace: %w", err)
 	}
 
 	dbPipelineRelease, err := s.repository.GetNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, id, false)
@@ -1783,10 +2121,16 @@ func (s *service) TriggerNamespacePipelineReleaseByID(ctx context.Context, ns re
 		return nil, nil, err
 	}
 
-	pipelineRun := s.logPipelineRunStart(ctx, pipelineTriggerID, pipelineUID, dbPipelineRelease.ID)
+	_ = s.logPipelineRunStart(ctx, logPipelineRunStartParams{
+		pipelineTriggerID: pipelineTriggerID,
+		pipelineUID:       pipelineUID,
+		pipelineReleaseID: dbPipelineRelease.ID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+	})
 	defer func() {
 		if err != nil {
-			s.logPipelineRunError(ctx, pipelineTriggerID, err, pipelineRun.StartedTime)
+			s.logPipelineRunError(ctx, pipelineTriggerID, err)
 		}
 	}()
 
@@ -1794,7 +2138,28 @@ func (s *service) TriggerNamespacePipelineReleaseByID(ctx context.Context, ns re
 		return nil, nil, err
 	}
 
-	outputs, triggerMetadata, err := s.triggerPipeline(ctx, ns, dbPipelineRelease.Recipe, dbPipeline.ID, dbPipeline.UID, dbPipelineRelease.ID, dbPipelineRelease.UID, data, pipelineTriggerID, returnTraces)
+	expiryRule, err := s.retentionHandler.GetExpiryRuleByNamespace(ctx, requesterUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("accessing expiry rule: %w", err)
+	}
+
+	err = s.preTriggerPipeline(ctx, requester, dbPipelineRelease.Recipe, pipelineTriggerID, data, expiryRule)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	outputs, triggerMetadata, err := s.triggerPipeline(ctx, triggerParams{
+		ns:                 ns,
+		pipelineID:         dbPipeline.ID,
+		pipelineUID:        dbPipeline.UID,
+		pipelineReleaseID:  dbPipelineRelease.ID,
+		pipelineReleaseUID: dbPipelineRelease.UID,
+		pipelineTriggerID:  pipelineTriggerID,
+		requesterUID:       requesterUID,
+		userUID:            userUID,
+		expiryRule:         expiryRule,
+		recipe:             dbPipelineRelease.Recipe,
+	}, returnTraces)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1807,7 +2172,13 @@ func (s *service) TriggerAsyncNamespacePipelineReleaseByID(ctx context.Context, 
 
 	dbPipeline, err := s.repository.GetPipelineByUID(ctx, pipelineUID, false, true)
 	if err != nil {
-		return nil, errdomain.ErrNotFound
+		return nil, errorsx.ErrNotFound
+	}
+
+	requesterUID, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	requester, err := s.GetNamespaceByUID(ctx, requesterUID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching requester namespace: %w", err)
 	}
 
 	dbPipelineRelease, err := s.repository.GetNamespacePipelineReleaseByID(ctx, ownerPermalink, pipelineUID, id, false)
@@ -1815,10 +2186,16 @@ func (s *service) TriggerAsyncNamespacePipelineReleaseByID(ctx context.Context, 
 		return nil, err
 	}
 
-	pipelineRun := s.logPipelineRunStart(ctx, pipelineTriggerID, pipelineUID, dbPipelineRelease.ID)
+	_ = s.logPipelineRunStart(ctx, logPipelineRunStartParams{
+		pipelineTriggerID: pipelineTriggerID,
+		pipelineUID:       pipelineUID,
+		pipelineReleaseID: dbPipelineRelease.ID,
+		requesterUID:      requesterUID,
+		userUID:           userUID,
+	})
 	defer func() {
 		if err != nil {
-			s.logPipelineRunError(ctx, pipelineTriggerID, err, pipelineRun.StartedTime)
+			s.logPipelineRunError(ctx, pipelineTriggerID, err)
 		}
 	}()
 
@@ -1826,7 +2203,27 @@ func (s *service) TriggerAsyncNamespacePipelineReleaseByID(ctx context.Context, 
 		return nil, err
 	}
 
-	operation, err := s.triggerAsyncPipeline(ctx, ns, dbPipelineRelease.Recipe, dbPipeline.ID, dbPipeline.UID, dbPipelineRelease.ID, dbPipelineRelease.UID, data, pipelineTriggerID, returnTraces)
+	expiryRule, err := s.retentionHandler.GetExpiryRuleByNamespace(ctx, requesterUID)
+	if err != nil {
+		return nil, fmt.Errorf("accessing expiry rule: %w", err)
+	}
+
+	err = s.preTriggerPipeline(ctx, requester, dbPipelineRelease.Recipe, pipelineTriggerID, data, expiryRule)
+	if err != nil {
+		return nil, err
+	}
+	operation, err := s.triggerAsyncPipeline(ctx, triggerParams{
+		ns:                 ns,
+		pipelineID:         dbPipeline.ID,
+		pipelineUID:        dbPipeline.UID,
+		pipelineReleaseID:  dbPipelineRelease.ID,
+		pipelineReleaseUID: dbPipelineRelease.UID,
+		pipelineTriggerID:  pipelineTriggerID,
+		requesterUID:       requesterUID,
+		userUID:            userUID,
+		expiryRule:         expiryRule,
+		recipe:             dbPipelineRelease.Recipe,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1847,13 +2244,19 @@ func (s *service) getOperationFromWorkflowInfo(ctx context.Context, workflowExec
 
 	switch workflowExecutionInfo.Status {
 	case enums.WORKFLOW_EXECUTION_STATUS_COMPLETED:
-
 		pipelineTriggerID := workflowExecutionInfo.Execution.WorkflowId
+		_, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
 		defer func() {
-			_ = s.memory.PurgeWorkflowMemory(ctx, pipelineTriggerID)
+			_ = s.memory.CleanupWorkflowMemory(context.Background(), userUID, pipelineTriggerID)
 		}()
 
-		outputs, metadata, err := s.getOutputsAndMetadata(ctx, pipelineTriggerID, true)
+		recipe, err := s.fetchRecipeSnapshot(ctx, pipelineTriggerID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching recipe snapshot: %w", err)
+		}
+
+		compIDs := slices.Collect(maps.Keys(recipe.Component))
+		outputs, metadata, err := s.getOutputsAndMetadata(ctx, userUID, pipelineTriggerID, compIDs, true)
 		if err != nil {
 			return nil, err
 		}
@@ -1867,7 +2270,7 @@ func (s *service) getOperationFromWorkflowInfo(ctx context.Context, workflowExec
 		if err != nil {
 			return nil, err
 		}
-		resp.TypeUrl = "buf.build/instill-ai/protobufs/vdp.pipeline.v1beta.TriggerNamespacePipelineResponse"
+		resp.TypeUrl = "buf.build/instill-ai/protobufs/pipeline.pipeline.v1beta.TriggerNamespacePipelineResponse"
 		operation = longrunningpb.Operation{
 			Done: true,
 			Result: &longrunningpb.Operation_Response{
@@ -1898,4 +2301,37 @@ func (s *service) getOperationFromWorkflowInfo(ctx context.Context, workflowExec
 
 	operation.Name = fmt.Sprintf("operations/%s", workflowExecutionInfo.Execution.WorkflowId)
 	return &operation, nil
+}
+
+func (s *service) fetchRecipeSnapshot(ctx context.Context, pipelineTriggerID string) (*datamodel.Recipe, error) {
+	// TODO [INS-7438] fetching the component IDs should be achievable through
+	// the component runs in the repository. However, the iterator execution
+	// isn't being stored as a component run and its child components are
+	// storing component runs instead.
+	pipelineRun, err := s.repository.GetPipelineRunByUID(ctx, uuid.FromStringOrNil(pipelineTriggerID))
+	if err != nil {
+		return nil, fmt.Errorf("fetching pipeline run: %w", err)
+	}
+
+	if len(pipelineRun.RecipeSnapshot) < 1 {
+		return nil, fmt.Errorf("pipeline run contains no recipe")
+	}
+	refID := pipelineRun.RecipeSnapshot[0].Name
+
+	_, userUID := resourcex.GetRequesterUIDAndUserUID(ctx)
+	fileContents, err := s.minioClient.WithLogger(s.log).GetFilesByPaths(ctx, userUID, []string{refID})
+	if err != nil {
+		return nil, fmt.Errorf("downloading recipe: %w", err)
+	}
+
+	if len(fileContents) < 1 {
+		return nil, fmt.Errorf("recipe snapshot is empty")
+	}
+
+	recipe := new(datamodel.Recipe)
+	if err = json.Unmarshal(fileContents[0].Content, recipe); err != nil {
+		return nil, fmt.Errorf("unmarshalling recipe: %w", err)
+	}
+
+	return recipe, nil
 }

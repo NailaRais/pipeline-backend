@@ -12,7 +12,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 
-	"github.com/instill-ai/x/errmsg"
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 func TestClient_SendReqAndUnmarshal(t *testing.T) {
@@ -132,7 +132,7 @@ func TestClient_SendReqAndUnmarshal(t *testing.T) {
 
 			_, err := client.R().SetResult(new(okBody)).Post(path)
 			c.Check(err, qt.IsNotNil)
-			c.Check(errmsg.Message(err), qt.Equals, tc.wantIssue)
+			c.Check(errorsx.Message(err), qt.Equals, tc.wantIssue)
 
 			// Error log contains desired keys.
 			for _, k := range tc.wantLogFields {
@@ -141,7 +141,7 @@ func TestClient_SendReqAndUnmarshal(t *testing.T) {
 			}
 
 			// All logs contain the "name" key. Sometimes (e.g. on
-			// unmarshalling error) we'll have > 1 log so the assertion above
+			// unmarshaling error) we'll have > 1 log so the assertion above
 			// is too particular.
 			logs := zLogs.FilterFieldKey("name")
 			c.Assert(logs.Len(), qt.Not(qt.Equals), 0)

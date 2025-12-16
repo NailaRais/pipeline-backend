@@ -19,9 +19,9 @@ import (
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util/httpclient"
 	"github.com/instill-ai/pipeline-backend/pkg/data"
-	"github.com/instill-ai/x/errmsg"
 
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 const (
@@ -35,12 +35,12 @@ const (
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/setup.json
-	setupJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/setup.yaml
+	setupYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -58,6 +58,7 @@ var (
 
 type component struct {
 	base.Component
+	urlValidator URLValidator
 }
 
 type execution struct {
@@ -67,10 +68,14 @@ type execution struct {
 	execute func(context.Context, *base.Job) error
 }
 
+// Init creates a component instance for production use
 func Init(bc base.Component) *component {
 	once.Do(func() {
-		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		comp = &component{
+			Component:    bc,
+			urlValidator: NewURLValidator(),
+		}
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -91,7 +96,7 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 	case taskGet, taskPost, taskPatch, taskPut, taskDelete, taskHead, taskOptions:
 		e.execute = e.executeHTTP
 	default:
-		return nil, errmsg.AddMessage(
+		return nil, errorsx.AddMessage(
 			fmt.Errorf("not supported task: %s", x.Task),
 			fmt.Sprintf("%s task is not supported.", x.Task),
 		)
@@ -139,26 +144,44 @@ func getAuthentication(setup *structpb.Struct) (authentication, error) {
 }
 
 func (e *execution) Execute(ctx context.Context, jobs []*base.Job) error {
-
 	return base.ConcurrentExecutor(ctx, jobs, e.execute)
 }
 
-func (e *execution) executeHTTP(ctx context.Context, job *base.Job) error {
+// validateInput checks the component's input is a valid URL. In production mode, this component only
+// accepts requests to *publicly available* endpoints. Any call to the internal
+// network will produce an error. In test mode, behavior is controlled by whitelist and localhost settings.
+func (e *execution) validateInput(input *httpInput) error {
+	comp := e.Component.(*component)
+	return comp.urlValidator.ValidateInput(input)
+}
 
+func (e *execution) executeHTTP(ctx context.Context, job *base.Job) error {
 	in := httpInput{}
 	if err := job.Input.ReadData(ctx, &in); err != nil {
-		return err
+		return fmt.Errorf("reading input data: %w", err)
+	}
+
+	if err := e.validateInput(&in); err != nil {
+		return fmt.Errorf("validating input: %w", err)
 	}
 
 	// An API error is a valid output in this component.
 	req := e.client.R()
 	if in.Body != nil {
-		req.SetBody(in.Body)
+		jsonValue, err := in.Body.ToJSONValue()
+		if err != nil {
+			return fmt.Errorf("failed to convert body to JSON value: %w", err)
+		}
+		req.SetBody(jsonValue)
+	}
+
+	for k, h := range in.Header {
+		req.SetHeader(k, strings.Join(h, ","))
 	}
 
 	resp, err := req.Execute(taskMethod[e.Task], in.EndpointURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("executing HTTP request: %w", err)
 	}
 
 	// Try to parse response as JSON first
@@ -169,11 +192,11 @@ func (e *execution) executeHTTP(ctx context.Context, job *base.Job) error {
 	case strings.Contains(contentType, "application/json"):
 		var jsonBody any
 		if err := json.Unmarshal(resp.Body(), &jsonBody); err != nil {
-			return fmt.Errorf("failed to parse JSON response: %w", err)
+			return fmt.Errorf("parsing JSON response: %w", err)
 		}
 		value, err := data.NewValue(jsonBody)
 		if err != nil {
-			return fmt.Errorf("failed to convert JSON response to format.Value: %w", err)
+			return fmt.Errorf("converting JSON response to format.Value: %w", err)
 		}
 		out := httpOutput{
 			StatusCode: resp.StatusCode(),
@@ -223,7 +246,7 @@ func (c *component) Test(sysVars map[string]any, setup *structpb.Struct) error {
 }
 
 // Generate the model_name enum based on the task
-func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.ComponentConfig) (*pb.ComponentDefinition, error) {
+func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.ComponentConfig) (*pipelinepb.ComponentDefinition, error) {
 	oriDef, err := c.Component.GetDefinition(nil, nil)
 	if err != nil {
 		return nil, err
@@ -232,7 +255,7 @@ func (c *component) GetDefinition(sysVars map[string]any, compConfig *base.Compo
 		return oriDef, nil
 	}
 
-	def := proto.Clone(oriDef).(*pb.ComponentDefinition)
+	def := proto.Clone(oriDef).(*pipelinepb.ComponentDefinition)
 	if compConfig == nil {
 		return def, nil
 	}

@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [Audio Transcription Generator](https://instill.tech/instill-ai/pipelines/audio-transcription/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -16,16 +14,16 @@ component:
     type: audio
     input:
       audio: ${variable.audio}
-      segments: ${audio-vad.output.segments}    
+      segments: ${audio-vad.output.segments}
     task: TASK_SEGMENT
 variable:
   audio:
     title: Audio to test
     description: Audio to test VAD and extraction
-    instill-format: audio
+    type: audio
 output:
   samples:
     title: Output audio segments
-    description: Output extracted audio segments    
-    value: ${audio-segment.output.audio-segments}  
+    description: Output extracted audio segments
+    value: ${audio-segment.output.audio-segments}
 ```

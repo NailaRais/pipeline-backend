@@ -2,11 +2,17 @@ package base
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
+	"runtime"
 	"sync"
 
-	"github.com/instill-ai/pipeline-backend/pkg/data"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/instill-ai/pipeline-backend/pkg/data"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 var _ IExecution = &ExecutionWrapper{}
@@ -19,15 +25,13 @@ type ExecutionWrapper struct {
 
 type inputReader struct {
 	InputReader
-	schema string
-	input  *structpb.Struct
+	input *structpb.Struct
 }
 
-func NewInputReader(ir InputReader, input *structpb.Struct, schema string) *inputReader {
+func NewInputReader(ir InputReader, input *structpb.Struct) *inputReader {
 	return &inputReader{
 		InputReader: ir,
 		input:       input,
-		schema:      schema,
 	}
 }
 
@@ -40,26 +44,22 @@ func (ir *inputReader) ReadData(ctx context.Context, input any) (err error) {
 // will be phased out gradually.
 func (ir *inputReader) Read(ctx context.Context) (input *structpb.Struct, err error) {
 	input = ir.input
-	if err = Validate(input, ir.schema, "input"); err != nil {
-		return nil, err
-	}
 	return input, nil
 }
 
 type outputWriter struct {
 	OutputWriter
-	schema string
 	output *structpb.Struct
 }
 
-func NewOutputWriter(ow OutputWriter, schema string) *outputWriter {
+func NewOutputWriter(ow OutputWriter) *outputWriter {
 	return &outputWriter{
 		OutputWriter: ow,
-		schema:       schema,
 	}
 }
 func (ow *outputWriter) WriteData(ctx context.Context, output any) (err error) {
-	outputMap, err := data.Marshal(output)
+	marshaler := data.NewMarshaler()
+	outputMap, err := marshaler.Marshal(output)
 	if err != nil {
 		return err
 	}
@@ -77,9 +77,6 @@ func (ow *outputWriter) WriteData(ctx context.Context, output any) (err error) {
 // and will be phased out gradually.
 func (ow *outputWriter) Write(ctx context.Context, output *structpb.Struct) (err error) {
 
-	if err := Validate(output, ow.schema, "output"); err != nil {
-		return err
-	}
 	ow.output = output
 
 	return ow.OutputWriter.Write(ctx, output)
@@ -92,7 +89,6 @@ func (ow *outputWriter) GetOutput() *structpb.Struct {
 
 // Execute wraps the execution method with validation and usage collection.
 func (e *ExecutionWrapper) Execute(ctx context.Context, jobs []*Job) (err error) {
-
 	newUH := e.GetComponent().UsageHandlerCreator()
 	h, err := newUH(e)
 	if err != nil {
@@ -103,6 +99,7 @@ func (e *ExecutionWrapper) Execute(ctx context.Context, jobs []*Job) (err error)
 	outputs := make([]*structpb.Struct, len(jobs))
 
 	validInputs := make([]*structpb.Struct, 0, len(jobs))
+	inputErrs := make([]error, 0, len(jobs))
 	validJobs := make([]*Job, 0, len(jobs))
 	validJobIdx := make([]int, 0, len(jobs))
 
@@ -111,23 +108,40 @@ func (e *ExecutionWrapper) Execute(ctx context.Context, jobs []*Job) (err error)
 	for batchIdx, job := range jobs {
 		inputs[batchIdx], err = job.Input.Read(ctx)
 		if err != nil {
+			if len(jobs) == 1 {
+				// No need to index the errors
+				return err
+			}
+
+			err := errorsx.AddMessage(
+				fmt.Errorf("invalid input [%d]: %w", batchIdx, err),
+				fmt.Sprintf("Invalid input on batch element %d.", batchIdx),
+			)
+
+			inputErrs = append(inputErrs, err)
 			job.Error.Error(ctx, err)
+
 			continue
 		}
+
 		validInputs = append(validInputs, inputs[batchIdx])
 		validJobs = append(validJobs, job)
 		validJobIdx = append(validJobIdx, batchIdx)
 	}
 
-	if err = h.Check(ctx, inputs); err != nil {
-		return err
+	if len(validInputs) == 0 {
+		return errors.Join(inputErrs...)
+	}
+
+	if err = h.Check(ctx, validInputs); err != nil {
+		return fmt.Errorf("checking trigger usage: %w", err)
 	}
 
 	wrappedJobs := make([]*Job, len(validJobs))
 	for batchIdx, job := range validJobs {
 		wrappedJobs[batchIdx] = &Job{
-			Input:  NewInputReader(job.Input, validInputs[batchIdx], e.GetTaskInputSchema()),
-			Output: NewOutputWriter(job.Output, e.GetTaskOutputSchema()),
+			Input:  NewInputReader(job.Input, validInputs[batchIdx]),
+			Output: NewOutputWriter(job.Output),
 			Error:  job.Error,
 		}
 	}
@@ -137,7 +151,7 @@ func (e *ExecutionWrapper) Execute(ctx context.Context, jobs []*Job) (err error)
 	}
 
 	// Since there might be multiple writes, we collect the usage at the end of
-	// the execution.​
+	// the execution.
 	for batchIdx, job := range wrappedJobs {
 		outputs[validJobIdx[batchIdx]] = job.Output.(*outputWriter).GetOutput()
 	}
@@ -200,7 +214,13 @@ func ConcurrentExecutor(ctx context.Context, jobs []*Job, execute func(context.C
 
 func recoverJobError(ctx context.Context, job *Job) {
 	if r := recover(); r != nil {
-		fmt.Printf("panic: %+v", r)
+		// For better debugging process for developers, we log the panic and the stack trace
+		buf := make([]byte, 2048)
+		n := runtime.Stack(buf, false)
+		stackTrace := string(buf[:n])
+		log.Printf("panic: %+v\n", r)
+		log.Printf("stack trace: %s\n", stackTrace)
+
 		job.Error.Error(ctx, fmt.Errorf("panic: %+v", r))
 		return
 	}

@@ -2,6 +2,7 @@ package data
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -66,4 +67,60 @@ func (m Map) Equal(other format.Value) bool {
 		return true
 	}
 	return false
+}
+
+func (m Map) String() string {
+	segments := make([]string, 0, len(m))
+	for k, v := range m {
+		switch v := v.(type) {
+		case *stringData:
+			segments = append(segments, fmt.Sprintf("\"%s\": \"%s\"", k, v.String()))
+		default:
+			segments = append(segments, fmt.Sprintf("\"%s\": %s", k, v.String()))
+		}
+	}
+	return fmt.Sprintf("{%s}", strings.Join(segments, ", "))
+}
+
+func (m Map) ToJSONValue() (v any, err error) {
+
+	jsonMap := make(map[string]any)
+	for k, v := range m {
+		jsonMap[k], err = v.ToJSONValue()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return jsonMap, nil
+}
+
+// Copy creates a deep copy of the Map to prevent concurrent access issues.
+// This is essential when passing map data across goroutine boundaries.
+func (m Map) Copy() Map {
+	if m == nil {
+		return nil
+	}
+	copied := make(Map, len(m))
+	for k, v := range m {
+		copied[k] = copyValue(v)
+	}
+	return copied
+}
+
+// copyValue creates a deep copy of any format.Value type.
+func copyValue(v format.Value) format.Value {
+	if v == nil {
+		return nil
+	}
+
+	switch val := v.(type) {
+	case Map:
+		return val.Copy()
+	case Array:
+		return val.Copy()
+	default:
+		// For primitive types (string, number, boolean, etc.) which are
+		// either immutable or contain no shared mutable state, return as-is.
+		return v
+	}
 }

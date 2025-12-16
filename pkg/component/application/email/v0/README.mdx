@@ -2,7 +2,7 @@
 title: "Email"
 lang: "en-US"
 draft: false
-description: "Learn about how to set up a VDP Email component https://github.com/instill-ai/instill-core"
+description: "Learn about how to set up a Email component https://github.com/instill-ai/instill-core"
 ---
 
 The Email component is an application component that allows users to get and send email from Mail Protocol.
@@ -12,19 +12,13 @@ It can carry out the following tasks:
 
 You can connect to different email servers through the Email component.
 Emails are fetched and sent using the IMAP and SMTP protocols, respectively. You can set the server address and port for each protocol in the component configuration.
-
-
 ## Release Stage
 
 `Alpha`
 
-
-
 ## Configuration
 
-The component definition and tasks are defined in the [definition.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/email/v0/config/definition.json) and [tasks.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/email/v0/config/tasks.json) files respectively.
-
-
+The component definition and tasks are defined in the [definition.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/email/v0/config/definition.yaml) and [tasks.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/application/email/v0/config/tasks.yaml) files respectively.
 
 
 ## Setup
@@ -34,7 +28,7 @@ In order to communicate with the
 external application, the following connection details need to be
 provided. You may specify them directly in a pipeline recipe as key-value pairs
 within the component's `setup` block, or you can create a **Connection** from
-the [**Integration Settings**](https://www.instill.tech/docs/vdp/integration)
+the [**Integration Settings**](https://docs.instill-ai.com/docs/set-up-component)
 page and reference the whole `setup` as `setup:
 ${connection.<my-connection-id>}`.
 
@@ -42,11 +36,10 @@ ${connection.<my-connection-id>}`.
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Server Address (required) | `server-address` | string | The address of the email server  |
-| Server Port (required) | `server-port` | integer | The port of the email server  |
-| Email Address (required) | `email-address` | string | The email address of the user  |
-| App Password (required) | `password` | string | The password of the App passwords in Gmail settings  |
-
+| Server Address (required) | `server-address` | string | The address of the email server. |
+| Server Port (required) | `server-port` | integer | The port of the email server. |
+| Email Address (required) | `email-address` | string | The email address of the user. |
+| App Password (required) | `password` | string | The password of the App passwords in Gmail settings. |
 </div>
 
 Supported Provider Samples for Sending Email
@@ -76,7 +69,6 @@ For App Password, please follow the steps below:
  - 4. Reference the secret in the App Password field in the component configuration.
 
 
-
 ## Supported Tasks
 
 ### Send Email
@@ -85,26 +77,24 @@ Send an email to recipients
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_SEND_EMAIL` |
-| Recipient (required) | `recipients` | array[string] | The email addresses of the recipients |
-| CC | `cc` | array[string] | The email addresses for Carbon Copy |
-| BCC | `bcc` | array[string] | The email addresses for Blind Carbon Copy |
-| Subject | `subject` | string | The subject of the email |
-| Message (required) | `message` | string | The message to be sent |
+| Recipient (required) | `recipients` | array[string] | The email addresses of the recipients. |
+| CC | `cc` | array[string] | The email addresses for Carbon Copy. |
+| BCC | `bcc` | array[string] | The email addresses for Blind Carbon Copy. |
+| Subject | `subject` | string | The subject of the email. |
+| Message (required) | `message` | string | The message to be sent. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Result | `result` | string | The result of sending the email |
+| Result | `result` | string | The result of sending the email. |
+
 </div>
 
 ### Read Emails
@@ -113,42 +103,42 @@ Read emails from a mailbox
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_READ_EMAILS` |
-| [Search](#read-emails-search) | `search` | object | The search criteria for the emails |
+| [Search](#read-emails-search) | `search` | object | The search criteria for the emails. |
+
 </div>
-
-
 <details>
 <summary> Input Objects in Read Emails</summary>
 
 <h4 id="read-emails-search">Search</h4>
 
-The search criteria for the emails
+The search criteria for the emails.
+
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Search Date | `date` | string | Search for emails with the date the email was sent  |
-| Limit | `limit` | integer | The maximum number of emails to search for  |
-| Mailbox | `mailbox` | string | The mailbox to search for emails  |
-| Search Message | `search-email-message` | string | Search for emails with a specific message  |
-| Search From | `search-from` | string | Search for emails from a specific email address  |
-| Search Subject | `search-subject` | string | Search for emails with a specific subject  |
-| Search To | `search-to` | string | Search for emails to a specific email address  |
+| Search Date | `date` | string | Search for emails with the date the email was sent. |
+| Limit | `limit` | integer | The maximum number of emails to search for. |
+| Mailbox | `mailbox` | string | The mailbox to search for emails. |
+| Search Message | `search-email-message` | string | Search for emails with a specific message. |
+| Search From | `search-from` | string | Search for emails from a specific email address. |
+| Search Subject | `search-subject` | string | Search for emails with a specific subject. |
+| Search To | `search-to` | string | Search for emails to a specific email address. |
 </div>
 </details>
 
-
-
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| [Emails](#read-emails-emails) | `emails` | array[object] | The emails that match the search criteria |
+| [Emails](#read-emails-emails) | `emails` | array[object] | The emails that match the search criteria. |
+
 </div>
+
 
 <details>
 <summary> Output Objects in Read Emails</summary>
@@ -159,13 +149,15 @@ The search criteria for the emails
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| Date | `date` | string | The date the email was sent |
-| From | `from` | string | The email address of the sender |
-| Message | `message` | string | The message of the email |
-| Subject | `subject` | string | The subject of the email |
-| To | `to` | array | The email addresses of the recipient |
+| Date | `date` | string | The date the email was sent. |
+| From | `from` | string | The email address of the sender. |
+| Message | `message` | string | The message of the email. |
+| Subject | `subject` | string | The subject of the email. |
+| To | `to` | array | The email addresses of the recipient. |
+
 </div>
 </details>
+
 #### Mailbox
 
 You have to confirm what exactly the mailbox name is.
@@ -181,5 +173,3 @@ Take Gmail as an example, the mailbox names are following.
 #### Search From and Search To
 You need to input the exact same email address with `<` as a prefix and `>` as a suffix as the email you want to search for.
 For example, if you want to search for the email from `email@example.com`, you need to input `<email@example.com>`.
-
-

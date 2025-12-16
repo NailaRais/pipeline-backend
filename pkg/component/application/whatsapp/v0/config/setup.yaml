@@ -1,0 +1,12 @@
+additionalProperties: false
+properties:
+  token:
+    description: Fill in your WhatsApp access token. Go [here](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started) for more information.
+    type: string
+    instillSecret: true
+    uiOrder: 0
+    title: Token
+required:
+  - token
+title: WhatsApp Connection
+type: object

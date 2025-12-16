@@ -9,10 +9,8 @@ import {
 import { pipelinePublicHost } from "./const.js";
 
 import * as componentDefinition from "./rest-component-definition.js";
-import * as connectorDefinition from "./rest-connector-definition.js";
 import * as constant from "./const.js";
 import * as integration from "./rest-integration.js";
-import * as operatorDefinition from "./rest-operator-definition.js";
 import * as pipelinePublic from './rest-pipeline-public.js';
 import * as pipelinePublicWithJwt from './rest-pipeline-public-with-jwt.js';
 import * as pipelinePrivate from './rest-pipeline-private.js';
@@ -48,8 +46,8 @@ export function setup() {
     "timeout": "600s",
   }
 
-  var resp = http.request("GET", `${constant.mgmtPublicHost}/v1beta/user`, {}, {headers: {"Authorization": `Bearer ${loginResp.json().accessToken}`}})
-  return {header: header, expectedOwner: resp.json().user}
+  var resp = http.request("GET", `${constant.mgmtPublicHost}/v1beta/user`, {}, { headers: { "Authorization": `Bearer ${loginResp.json().accessToken}` } })
+  return { header: header, expectedOwner: resp.json().user }
 }
 
 export default function (data) {
@@ -88,12 +86,9 @@ export default function (data) {
   pipelinePublic.CheckLookUp(data);
 
   trigger.CheckTrigger(data);
+  trigger.CheckPipelineRuns(data);
   triggerAsync.CheckTrigger(data);
 
-  connectorDefinition.CheckList(data);
-  connectorDefinition.CheckGet(data);
-  operatorDefinition.CheckList();
-  operatorDefinition.CheckGet();
   componentDefinition.CheckList(data);
 
   integration.CheckIntegrations();
@@ -109,7 +104,7 @@ export function teardown(data) {
     }
   });
 
-  group("Integration API: Delete all connections created by this test", () => {
+  group("Integration API: Delete data created by this test", () => {
     var q = `DELETE FROM connection WHERE id LIKE '${constant.dbIDPrefix}%';`;
     constant.db.exec(q);
 

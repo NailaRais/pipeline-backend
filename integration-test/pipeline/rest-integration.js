@@ -27,8 +27,16 @@ export function CheckIntegrations() {
     });
 
     var id = "github";
-    var cdef = http.request("GET", `${pipelinePublicHost}/v1beta/connector-definitions/${id}`, null, null).
-      json().connectorDefinition;
+    var cdefs = http.request("GET", `${pipelinePublicHost}/v1beta/component-definitions?filter=qTitle="GitHub"`, null, null).
+      json().componentDefinitions;
+
+    var cdef = null;
+    for (var i = 0; i < cdefs.length; i++) {
+      if (cdefs[i].id === id) {
+        cdef = cdefs[i];
+        break;
+      }
+    }
 
     var integration = {
       uid: cdef.uid,
@@ -38,14 +46,13 @@ export function CheckIntegrations() {
       vendor: cdef.vendor,
       icon: cdef.icon,
       setupSchema: null,
-      schemas: [], // Deprecated
       view: "VIEW_BASIC"
     };
 
     var oAuthConfig = {
       authUrl: "https://github.com/login/oauth/authorize",
       accessUrl: "https://github.com/login/oauth/access_token",
-      scopes: ["repo", "write:repo_hook"],
+      scopes: ["repo", "admin:repo_hook"],
     };
 
     // Basic view
@@ -58,11 +65,7 @@ export function CheckIntegrations() {
     check(http.request("GET", `${pipelinePublicHost}/v1beta/integrations/${id}?view=VIEW_FULL`, null, null), {
       [`GET /v1beta/integrations/${id}?view=VIEW_FULL response status is 200`]: (r) => r.status === 200,
       [`GET /v1beta/integrations/${id}?view=VIEW_FULL response contains schema`]: (r) => r.json().integration.setupSchema.required[0] === "token",
-      // TODO INS-6570 scope OAuth tests to this repository (enable them with a
-      // flag) and reintroduce this check.
-      // [`GET /v1beta/integrations/${id}?view=VIEW_FULL response contains OAuth config`]: (r) => deepEqual(r.json().integration.oAuthConfig, oAuthConfig),
-      // Deprecated
-      [`DEPRECATED GET /v1beta/integrations/${id}?view=VIEW_FULL response contains schema`]: (r) => r.json().integration.schemas[0].method === "METHOD_DICTIONARY",
+      [`GET /v1beta/integrations/${id}?view=VIEW_FULL response contains OAuth config`]: (r) => deepEqual(r.json().integration.oAuthConfig, oAuthConfig),
     });
   });
 
@@ -105,9 +108,9 @@ export function CheckConnections(data) {
   var connectionID = dbIDPrefix + randomString(8);
   var collectionPath = `/v1beta/namespaces/${defaultUsername}/connections`;
   var resourcePath = `${collectionPath}/${connectionID}`;
-  var integrationID = "asana"; // TODO reintroduce "github" with INS-6570
+  var integrationID = "github";
 
-  var setup = {"token": "one2THREE"};
+  var setup = { "token": "one2THREE" };
   var identity = "identitti";
 
   group("Integration API: Create connection", () => {
@@ -133,13 +136,9 @@ export function CheckConnections(data) {
       [`POST ${path} (dictionary) has a creation time`]: (r) => new Date(r.json().connection.createTime).getTime() > new Date().setTime(0),
     });
 
-    // TODO INS-6570 scope OAuth tests to this repository (enable them with a
-    // flag) and reintroduce this check.
-
-    /*
     // Besides an OAuth configuration on the component definition, OAuth
     // support requires the client ID and secret to be defined in the config
-    // (as environment variables). Make sure .env.component contains a client
+    // (as environment variables). Make sure .env.secrets.component contains a client
     // secret and ID for GitHub and that it doesn't for Slack.
 
     // Successful creation: OAuth
@@ -167,7 +166,6 @@ export function CheckConnections(data) {
       [`POST ${path} (OAuth) has an identity`]: (r) => r.json().connection.identity === identity,
       [`POST ${path} (OAuth) has a creation time`]: (r) => new Date(r.json().connection.createTime).getTime() > new Date().setTime(0),
     });
-    */
 
     // Check OAuth support.
     var unsupportedOAuthReq = http.request(
@@ -219,7 +217,7 @@ export function CheckConnections(data) {
         id: "invalid-setup",
         integrationId: integrationID,
         method: "METHOD_OAUTH",
-        setup: {"token": 234},
+        setup: { "token": 234 },
         scopes: ["repo", "write:repo_hook"],
         identity: identity,
       }),
@@ -236,7 +234,7 @@ export function CheckConnections(data) {
         id: "invalid-method",
         integrationId: integrationID,
         method: "METHOD_DICTIONARY",
-        setup: {"token": 234},
+        setup: { "token": 234 },
         scopes: ["repo", "write:repo_hook"],
         identity: identity,
       }),
@@ -248,7 +246,7 @@ export function CheckConnections(data) {
   });
 
   group("Integration API: Get connection", () => {
-    var path = resourcePath; // + "-oauth"; TODO reintroduce with INS-6570
+    var path = resourcePath + "-oauth";
 
     check(http.request("GET", pipelinePublicHost + path + "aaa", null, data.header), {
       [`GET ${path + "aaa"} response status is 404`]: (r) => r.status === 404,
@@ -260,9 +258,8 @@ export function CheckConnections(data) {
       [`GET ${path} has basic view`]: (r) => r.json().connection.view === "VIEW_BASIC",
       [`GET ${path} has setup hidden`]: (r) => r.json().connection.setup === null,
       [`GET ${path} has integration ID`]: (r) => r.json().connection.integrationId === integrationID,
-      [`GET ${path} has integration title`]: (r) => r.json().connection.integrationTitle === "Asana", // TODO reintroduce "GitHub" with INS-6570
-      // TODO reintroduce with INS-6570
-      // [`GET ${path} has an identity`]: (r) => r.json().connection.identity === identity,
+      [`GET ${path} has integration title`]: (r) => r.json().connection.integrationTitle === "GitHub",
+      [`GET ${path} has an identity`]: (r) => r.json().connection.identity === identity,
     });
 
     // Full view
@@ -271,9 +268,8 @@ export function CheckConnections(data) {
       [`GET ${path + "?view=VIEW_FULL"} has full view`]: (r) => r.json().connection.view === "VIEW_FULL",
       [`GET ${path + "?view=VIEW_FULL"} has setup`]: (r) => r.json().connection.setup != null,
       [`GET ${path + "?view=VIEW_FULL"} has setup value`]: (r) => r.json().connection.setup.password === setup.password, // TODO: redact
-      // TODO reintroduce with INS-6570
-      // [`GET ${path + "?view=VIEW_FULL"} has scopes`]: (r) => r.json().connection.scopes.length > 0,
-      // [`GET ${path + "?view=VIEW_FULL"} has OAuth details`]: (r) => r.json().connection.oAuthAccessDetails.access_token.length > 0, // TODO redact
+      [`GET ${path + "?view=VIEW_FULL"} has scopes`]: (r) => r.json().connection.scopes.length > 0,
+      [`GET ${path + "?view=VIEW_FULL"} has OAuth details`]: (r) => r.json().connection.oAuthAccessDetails.access_token.length > 0, // TODO redact
     });
   });
 
@@ -281,7 +277,7 @@ export function CheckConnections(data) {
     var path = collectionPath;
     var nConnections = 12;
     // Connections have been created in previous tests.
-    var totalConnections = nConnections + 1; // TODO +2 with INS-6570
+    var totalConnections = nConnections + 2;
     var integrationID = "openai";
 
     for (var i = 0; i < nConnections; i++) {
@@ -303,7 +299,7 @@ export function CheckConnections(data) {
 
 
     // With connection ID filter
-    var pathWithFilter =  path + `?filter=qConnection="${dbIDPrefix}"`;
+    var pathWithFilter = path + `?filter=qConnection="${dbIDPrefix}"`;
     var firstPage = http.request("GET", pipelinePublicHost + pathWithFilter, null, data.header);
     check(firstPage, {
       [`GET ${pathWithFilter} response status is 200`]: (r) => r.status === 200,
@@ -339,7 +335,7 @@ export function CheckConnections(data) {
 version: v1beta
 variable:
   recipients:
-    instill-format: array:string
+    type: array:string
 output:
   resp:
     title: Response
@@ -380,7 +376,7 @@ component:
         ),
         {
           [`POST /v1beta/namespaces/${defaultUsername}/pipelines ${reqBody.id} response status is 201`]:
-          (r) => r.status === 201,
+            (r) => r.status === 201,
         }
       );
     }
@@ -409,9 +405,6 @@ component:
   });
 
   group("Integration API: Update connection", () => {
-
-    // TODO reintroduce with INS-6570
-    /*
     var path = resourcePath + "-oauth";
     var originalConn = http.request(
       "GET",
@@ -436,7 +429,7 @@ component:
         id: newID,
         // Fields with an underlying structpb.Struct type (setup,
         // oAuthAccessDetails) will be updated in block.
-        setup: {"token": newToken},
+        setup: { "token": newToken },
         identity: newIdentity,
         oAuthAccessDetails: {
           access_token: newToken,
@@ -471,7 +464,6 @@ component:
       [`GET ${path + "?view=VIEW_FULL"} has new setup value`]: (r) =>
         r.json().connection.setup.token === newToken,
     });
-    */
   });
 
   group("Integration API: Delete connection", () => {

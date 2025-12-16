@@ -6,73 +6,104 @@
 include .env
 export
 
-GOTEST_FLAGS := CFG_DATABASE_HOST=${TEST_DBHOST} CFG_DATABASE_NAME=${TEST_DBNAME}
+# Default network for local development, can be overridden
+DOCKER_NETWORK ?= instill-network
 
 #============================================================================
 
 .PHONY: dev
-dev:							## Run dev container
+dev: ## Run dev container
 	@docker compose ls -q | grep -q "instill-core" && true || \
-		(echo "Error: Run \"make latest PROFILE=pipeline\" in vdp repository (https://github.com/instill-ai/instill-core) in your local machine first." && exit 1)
+		(echo "Error: Run \"make latest\" in instill-core repository (https://github.com/instill-ai/instill-core) in your local machine first and run \"docker rm -f ${SERVICE_NAME} ${SERVICE_NAME}-worker\"." && exit 1)
 	@docker inspect --type container ${SERVICE_NAME} >/dev/null 2>&1 && echo "A container named ${SERVICE_NAME} is already running." || \
 		echo "Run dev container ${SERVICE_NAME}. To stop it, run \"make stop\"."
 	@docker run -d --rm \
 		-v $(PWD):/${SERVICE_NAME} \
 		-p ${PUBLIC_SERVICE_PORT}:${PUBLIC_SERVICE_PORT} \
 		-p ${PRIVATE_SERVICE_PORT}:${PRIVATE_SERVICE_PORT} \
-		--env-file .env.component \
+		--env-file .env.secrets.component \
 		--network instill-network \
 		--name ${SERVICE_NAME} \
 		instill/${SERVICE_NAME}:dev >/dev/null 2>&1
 
 .PHONY: latest
-latest:							## Run latest container
+latest: ## Run latest container
 	@docker compose ls -q | grep -q "instill-core" && true || \
-		(echo "Error: Run \"make latest PROFILE=pipeline\" in vdp repository (https://github.com/instill-ai/instill-core) in your local machine first." && exit 1)
+		(echo "Error: Run \"make latest\" in instill-core repository (https://github.com/instill-ai/instill-core) in your local machine first and run \"docker rm -f ${SERVICE_NAME} ${SERVICE_NAME}-worker\"." && exit 1)
 	@docker inspect --type container ${SERVICE_NAME} >/dev/null 2>&1 && echo "A container named ${SERVICE_NAME} is already running." || \
 		echo "Run latest container ${SERVICE_NAME} and ${SERVICE_NAME}-worker. To stop it, run \"make stop\"."
 	@docker run --network=instill-network \
 		--name ${SERVICE_NAME} \
-		-d instill/${SERVICE_NAME}:latest ./${SERVICE_NAME}
+		-p ${PUBLIC_SERVICE_PORT}:${PUBLIC_SERVICE_PORT} \
+		-p ${PRIVATE_SERVICE_PORT}:${PRIVATE_SERVICE_PORT} \
+		-d instill/${SERVICE_NAME}:latest \
+		/bin/sh -c "\
+		./${SERVICE_NAME}-migrate && \
+		./${SERVICE_NAME}-init && \
+		./${SERVICE_NAME} \
+		"
 	@docker run --network=instill-network \
 		--name ${SERVICE_NAME}-worker \
 		-d instill/${SERVICE_NAME}:latest ./${SERVICE_NAME}-worker
+
+.PHONY: logs
+logs:							## Tail container logs with -n 10
+	@docker logs ${SERVICE_NAME} --follow --tail=10
+
+.PHONY: stop
+stop:							## Stop all running containers
+	@docker stop -t 1 ${SERVICE_NAME} ${SERVICE_NAME}-worker 2>/dev/null || true
 
 .PHONY: rm
 rm:								## Remove all running containers
 	@docker rm -f ${SERVICE_NAME} ${SERVICE_NAME}-worker >/dev/null 2>&1
 
+.PHONY: top
+top:							## Display all running service processes
+	@docker top ${SERVICE_NAME}
+
 .PHONY: build-dev
-build-dev:							## Build dev docker image
+build-dev: ## Build dev docker image
 	@docker build \
 		--build-arg SERVICE_NAME=${SERVICE_NAME} \
-		--build-arg GOLANG_VERSION=${GOLANG_VERSION} \
 		--build-arg K6_VERSION=${K6_VERSION} \
 		--build-arg XK6_VERSION=${XK6_VERSION} \
+		--build-arg XK6_SQL_VERSION=${XK6_SQL_VERSION} \
+		--build-arg XK6_SQL_POSTGRES_VERSION=${XK6_SQL_POSTGRES_VERSION} \
 		-f Dockerfile.dev -t instill/${SERVICE_NAME}:dev .
 
 .PHONY: build-latest
-build-latest:							## Build latest docker image
+build-latest: ## Build latest docker image
 	@docker build \
-		--build-arg GOLANG_VERSION=${GOLANG_VERSION} \
 		--build-arg SERVICE_NAME=${SERVICE_NAME} \
-		-t instill/pipeline-backend:latest .
+		--build-arg SERVICE_VERSION=dev \
+		-t instill/${SERVICE_NAME}:latest .
 
 .PHONY: go-gen
-go-gen:       					## Generate codes
+go-gen: ## Generate codes
 	go generate ./...
 
 .PHONY: dbtest-pre
 dbtest-pre:
-	@${GOTEST_FLAGS} go run ./cmd/migration
+	@docker run --rm \
+		-v $(PWD):/${SERVICE_NAME} \
+		--user $(id -u):$(id -g) \
+		-e CFG_DATABASE_HOST=${TEST_DBHOST} \
+		-e CFG_DATABASE_NAME=${TEST_DBNAME} \
+		--network ${DOCKER_NETWORK} \
+		--entrypoint= \
+		instill/${SERVICE_NAME}:dev \
+			go run ./cmd/migration
 
 .PHONY: coverage
-coverage:
+coverage: ## Generate coverage report
 	@if [ "${DBTEST}" = "true" ]; then  make dbtest-pre; fi
 	@docker run --rm \
 		-v $(PWD):/${SERVICE_NAME} \
-		-e GOTEST_FLAGS="${GOTEST_FLAGS}" \
 		--user $(id -u):$(id -g) \
+		-e CFG_DATABASE_HOST=${TEST_DBHOST} \
+		-e CFG_DATABASE_NAME=${TEST_DBNAME} \
+		--network ${DOCKER_NETWORK} \
 		--entrypoint= \
 		instill/${SERVICE_NAME}:dev \
 			go test -v -race ${GOTEST_TAGS} -coverpkg=./... -coverprofile=coverage.out -covermode=atomic -timeout 30m ./...
@@ -91,7 +122,7 @@ coverage:
 # If you encounter container test issues, install tparse locally:
 # go install github.com/mfridman/tparse/cmd/tparse@latest
 .PHONY: test
-test:
+test: ## Run unit test
 	@TAGS=""; \
 	if [ "$${OCR}" = "true" ]; then \
 		TAGS="$$TAGS,ocr"; \
@@ -114,9 +145,9 @@ test:
 	fi
 
 .PHONY: integration-test
-integration-test:				## Run integration test
+integration-test: ## Run integration test
 	@ # DB_HOST points to localhost by default. Override this variable if
-	@ # pipeline-backend's database isn't accessible at that host.
+	@ # ${SERVICE_NAME}'s database isn't accessible at that host.
 	@TEST_FOLDER_ABS_PATH=${PWD} k6 run \
 		-e API_GATEWAY_PROTOCOL=${API_GATEWAY_PROTOCOL} \
 		-e API_GATEWAY_URL=${API_GATEWAY_URL} \
@@ -129,17 +160,17 @@ integration-test:				## Run integration test
 		integration-test/pipeline/rest.js --no-usage-report --quiet
 
 .PHONY: gen-mock
-gen-mock:
-	@go install github.com/gojuno/minimock/v3/cmd/minimock@v3.4.0
+gen-mock: ## Generate mock files
+	@go install github.com/gojuno/minimock/v3/cmd/minimock@v3.4.5
 	@go generate -run minimock ./...
 
 .PHONY: gen-component-doc
-gen-component-doc:				## Generate component docs
+gen-component-doc: ## Generate component docs
 	@rm -f $$(find ./pkg/component -name README.mdx | paste -d ' ' -s -)
 	@cd ./pkg/component/tools/compogen && go install .
 	@go generate -run compogen ./pkg/component/...
 
 .PHONY: help
-help:       	 				## Show this help
+help: ## Show this help
 	@echo "\nMakefile for local development"
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m (default: help)\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

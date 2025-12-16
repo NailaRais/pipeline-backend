@@ -1,7 +1,5 @@
 ## Example Recipes
 
-Recipe for the [Content Reviewer](https://instill.tech/instill-ai/pipelines/contract-reviewer/playground) pipeline.
-
 ```yaml
 version: v1beta
 component:
@@ -46,10 +44,10 @@ component:
 variable:
   contract_pdf_file:
     title: Contract PDF file
-    instill-format: "*/*"
+    type: document
   question:
     title: Question
-    instill-format: string
+    type: string
 
 output:
   contract_question_answering:

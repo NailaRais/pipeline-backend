@@ -1,8 +1,22 @@
 repos:
+  - repo: https://github.com/jumanjihouse/pre-commit-hook-yamlfmt
+    rev: 0.2.3
+    hooks:
+      - id: yamlfmt
+        args:
+          - --mapping
+          - "2"
+          - --sequence
+          - "4"
+          - --offset
+          - "2"
+          - --preserve-quotes
+          - --implicit_start
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
       - id: check-yaml
+      - id: double-quote-string-fixer
       - id: end-of-file-fixer
         exclude: (?i).*testdata/
         exclude_types: [svg, mdx]
@@ -11,6 +25,18 @@ repos:
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
+      # To make the golangci-lint hook work with ONNX:
+      # 1. Install ONNX runtime locally:
+      #    - Mac: `brew install onnxruntime`
+      #    - Linux: Follow https://github.com/streamer45/silero-vad-go
+      # 2. For Mac OS with Homebrew:
+      #    a. Get install path and version:
+      #       export ONNX_VERSION=$(brew list onnxruntime --versions | awk '{print $2}')
+      #       export ONNX_PATH=$(brew --prefix onnxruntime)
+      #    b. Set environment variables:
+      #       export LIBRARY_PATH=$ONNX_PATH/lib
+      #       export C_INCLUDE_PATH=$ONNX_PATH/include/onnxruntime
+      #    c. Run: sudo update_dyld_shared_cache
       - id: golangci-lint
         args: ["--build-tags", "onnx"]
       - id: go-mod-tidy
@@ -19,3 +45,10 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
+  - repo: local
+    hooks:
+      - id: generate-docs
+        name: Generate Docs
+        entry: bash -c 'make gen-component-doc'
+        language: system
+        files: ^pkg/component/.*\.(json|mdx)$

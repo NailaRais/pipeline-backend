@@ -14,28 +14,33 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
+	"gopkg.in/yaml.v3"
 
 	jsoniter "github.com/json-iterator/go"
+	temporalclient "go.temporal.io/sdk/client"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/jsonref"
+	"github.com/instill-ai/pipeline-backend/pkg/data/format"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
 )
 
 const conditionJSON = `
 {
+	"uiOrder": 1,
+	"shortDescription": "config whether the component will be executed or skipped",
 	"type": "string",
-	"instillUIOrder": 1,
-	"instillShortDescription": "config whether the component will be executed or skipped",
-	"instillAcceptFormats": ["string"],
-    "instillUpstreamTypes": ["value", "template"]
+	"upstreamTypes": ["value", "template"]
 }
 `
 
+// InstillExtension is the extension for the component.
 type InstillExtension struct {
 	jsoniter.DummyExtension
 }
 
+// UpdateStructDescriptor updates the struct descriptor for the component.
 func (e *InstillExtension) UpdateStructDescriptor(structDescriptor *jsoniter.StructDescriptor) {
 
 	// We use kebab-case for JSON keys in component input and output, while
@@ -68,30 +73,91 @@ type IComponent interface {
 	GetDefinitionID() string
 	GetDefinitionUID() uuid.UUID
 	GetLogger() *zap.Logger
-	GetTaskInputSchemas() map[string]string
-	GetTaskOutputSchemas() map[string]string
 
-	LoadDefinition(definitionJSON, setupJSON, tasksJSON []byte, additionalJSONBytes map[string][]byte) error
+	LoadDefinition(definitionJSON, setupJSON, tasksJSON []byte, eventJSONBytes []byte, additionalJSONBytes map[string][]byte) error
 
 	// Note: Some content in the definition JSON schema needs to be generated
 	// by sysVars or component setting.
-	GetDefinition(sysVars map[string]any, compConfig *ComponentConfig) (*pb.ComponentDefinition, error)
+	GetDefinition(sysVars map[string]any, compConfig *ComponentConfig) (*pipelinepb.ComponentDefinition, error)
 
 	// CreateExecution takes a ComponentExecution that can be used to compose
 	// the core component behaviour with the particular business logic in the
-	// implmentation.
+	// implementation.
 	CreateExecution(base ComponentExecution) (IExecution, error)
 	Test(sysVars map[string]any, config *structpb.Struct) error
 
 	IsSecretField(target string) bool
 	SupportsOAuth() bool
 
-	// Note: These two functions are for the pipeline run-on-event feature,
+	// Note: These functions are for the pipeline run-on-event feature,
 	// which is still experimental and may change at any time.
-	HandleVerificationEvent(header map[string][]string, req *structpb.Struct, setup map[string]any) (isVerification bool, resp *structpb.Struct, err error)
-	ParseEvent(ctx context.Context, req *structpb.Struct, setup map[string]any) (parsed *structpb.Struct, err error)
+
+	// RegisterEvent registers an event handler for the component. It performs
+	// two main tasks:
+	// 1. Registers a webhook URL with the vendor service if required
+	// 2. Generates a identifier for the event registration that will be used to
+	//    route incoming events to the correct pipeline
+	//
+	// The identifier returned by this method will be stored in backend and used
+	// later to match incoming webhook events with their corresponding pipeline.
+	RegisterEvent(ctx context.Context, settings *RegisterEventSettings) (identifier []Identifier, err error)
+
+	// UnregisterEvent unregisters an event handler for the component.
+	UnregisterEvent(ctx context.Context, settings *UnregisterEventSettings, identifier []Identifier) error
+
+	// IdentifyEvent identifies the event and returns the identifiers.
+	IdentifyEvent(ctx context.Context, rawEvent *RawEvent) (identifierResult *IdentifierResult, err error)
+
+	// ParseEvent parses the raw event and returns a parsed event.
+	// The parsed event contains:
+	// - parsed message: the processed event data
+	// - webhook response: any response that should be sent back to the webhook caller
+	ParseEvent(ctx context.Context, rawEvent *RawEvent) (parsedEvent *ParsedEvent, err error)
 
 	UsageHandlerCreator() UsageHandlerCreator
+}
+
+// Identifier is the identifier for the event.
+type Identifier map[string]any
+
+// EventSettings is the settings for the event.
+type EventSettings struct {
+	// TODO: The Config field represents the component configuration settings
+	// while Setup contains initialization parameters. Consider renaming to
+	// a more explicit name for clarity.
+	Config format.Value
+	Setup  format.Value
+}
+
+// RegisterEventSettings is the settings for registering an event.
+type RegisterEventSettings struct {
+	EventSettings
+	RegistrationUID uuid.UUID
+}
+
+// UnregisterEventSettings is the settings for unregistering an event.
+type UnregisterEventSettings struct {
+	EventSettings
+}
+
+// RawEvent is the raw event from the webhook.
+type RawEvent struct {
+	EventSettings
+	Header  map[string][]string
+	Message format.Value
+}
+
+// ParsedEvent is the parsed event from the raw event.
+type ParsedEvent struct {
+	ParsedMessage format.Value
+	Response      format.Value
+}
+
+// IdentifierResult is the result of identifying an event.
+type IdentifierResult struct {
+	SkipTrigger bool
+	Identifiers []Identifier
+	Response    format.Value
 }
 
 // Component implements the common component methods.
@@ -99,49 +165,64 @@ type Component struct {
 	Logger          *zap.Logger
 	NewUsageHandler UsageHandlerCreator
 
-	taskInputSchemas  map[string]string
-	taskOutputSchemas map[string]string
+	definition   *pipelinepb.ComponentDefinition
+	secretFields []string
 
-	definition               *pb.ComponentDefinition
-	secretFields             []string
-	inputAcceptFormatsFields map[string]map[string][]string
-	outputFormatsFields      map[string]map[string]string
+	BinaryFetcher  external.BinaryFetcher
+	TemporalClient temporalclient.Client
 }
 
-func (c *Component) HandleVerificationEvent(header map[string][]string, req *structpb.Struct, setup map[string]any) (isVerification bool, resp *structpb.Struct, err error) {
-	return false, nil, nil
+// IdentifyEvent is not implemented for the base component.
+func (c *Component) IdentifyEvent(ctx context.Context, rawEvent *RawEvent) (identifierResult *IdentifierResult, err error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
-func (c *Component) ParseEvent(ctx context.Context, req *structpb.Struct, setup map[string]any) (parsed *structpb.Struct, err error) {
-	return req, nil
+// ParseEvent is not implemented for the base component.
+func (c *Component) ParseEvent(ctx context.Context, rawEvent *RawEvent) (*ParsedEvent, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// RegisterEvent is not implemented for the base component.
+func (c *Component) RegisterEvent(context.Context, *RegisterEventSettings) ([]Identifier, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// UnregisterEvent is not implemented for the base component.
+func (c *Component) UnregisterEvent(context.Context, *UnregisterEventSettings, []Identifier) error {
+	return fmt.Errorf("not implemented")
 }
 
 func convertDataSpecToCompSpec(dataSpec *structpb.Struct) (*structpb.Struct, error) {
-	// var err error
+
 	compSpec := proto.Clone(dataSpec).(*structpb.Struct)
 	if _, ok := compSpec.Fields["const"]; ok {
 		return compSpec, nil
 	}
 
-	isFreeform := checkFreeForm(compSpec)
-
-	if _, ok := compSpec.Fields["type"]; !ok && !isFreeform {
-		return nil, fmt.Errorf("type missing: %+v", compSpec)
-	} else if _, ok := compSpec.Fields["instillUpstreamTypes"]; !ok && compSpec.Fields["type"].GetStringValue() == "object" {
-
-		if _, ok := compSpec.Fields["instillUIOrder"]; !ok {
-			compSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(0)
+	// Handle composite schemas (anyOf/allOf/oneOf)
+	for _, target := range []string{"allOf", "anyOf", "oneOf"} {
+		if fields, ok := compSpec.Fields[target]; ok {
+			for idx, schema := range fields.GetListValue().GetValues() {
+				converted, err := convertDataSpecToCompSpec(schema.GetStructValue())
+				if err != nil {
+					return nil, err
+				}
+				fields.GetListValue().Values[idx] = structpb.NewStructValue(converted)
+			}
 		}
+	}
+
+	if compSpec.Fields["type"] != nil && compSpec.Fields["type"].GetStringValue() == "object" {
+		// Always add required field for object type if missing
 		if _, ok := compSpec.Fields["required"]; !ok {
-			return nil, fmt.Errorf("required missing: %+v", compSpec)
+			compSpec.Fields["required"] = structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{}})
 		}
-		if _, ok := compSpec.Fields["instillEditOnNodeFields"]; !ok {
-			compSpec.Fields["instillEditOnNodeFields"] = compSpec.Fields["required"]
-		}
-
-		if _, ok := compSpec.Fields["properties"]; ok {
-			for k, v := range compSpec.Fields["properties"].GetStructValue().AsMap() {
-				s, err := structpb.NewStruct(v.(map[string]any))
+	}
+	if _, ok := compSpec.Fields["properties"]; ok {
+		for k, v := range compSpec.Fields["properties"].GetStructValue().AsMap() {
+			switch val := v.(type) {
+			case map[string]any:
+				s, err := structpb.NewStruct(val)
 				if err != nil {
 					return nil, err
 				}
@@ -150,12 +231,34 @@ func convertDataSpecToCompSpec(dataSpec *structpb.Struct) (*structpb.Struct, err
 					return nil, err
 				}
 				compSpec.Fields["properties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
+			case []interface{}:
+				listValue := &structpb.ListValue{
+					Values: make([]*structpb.Value, len(val)),
+				}
+				for i, item := range val {
+					value, err := structpb.NewValue(item)
+					if err != nil {
+						return nil, err
+					}
+					listValue.Values[i] = value
+				}
+				compSpec.Fields["properties"].GetStructValue().Fields[k] = structpb.NewListValue(listValue)
+			case string, bool, float64, int64:
+				value, err := structpb.NewValue(val)
+				if err != nil {
+					return nil, err
+				}
+				compSpec.Fields["properties"].GetStructValue().Fields[k] = value
+			default:
+				return nil, fmt.Errorf("unsupported type: %T", v)
 			}
 		}
-		if _, ok := compSpec.Fields["patternProperties"]; ok {
-			for k, v := range compSpec.Fields["patternProperties"].GetStructValue().AsMap() {
-				s, err := structpb.NewStruct(v.(map[string]any))
+	}
+	if _, ok := compSpec.Fields["patternProperties"]; ok {
+		for k, v := range compSpec.Fields["patternProperties"].GetStructValue().AsMap() {
+			switch val := v.(type) {
+			case map[string]any:
+				s, err := structpb.NewStruct(val)
 				if err != nil {
 					return nil, err
 				}
@@ -164,89 +267,37 @@ func convertDataSpecToCompSpec(dataSpec *structpb.Struct) (*structpb.Struct, err
 					return nil, err
 				}
 				compSpec.Fields["patternProperties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
-			}
-		}
-		for _, target := range []string{"allOf", "anyOf", "oneOf"} {
-			if _, ok := compSpec.Fields[target]; ok {
-				for idx, item := range compSpec.Fields[target].GetListValue().AsSlice() {
-					s, err := structpb.NewStruct(item.(map[string]any))
-					if err != nil {
-						return nil, err
-					}
-					converted, err := convertDataSpecToCompSpec(s)
-					if err != nil {
-						return nil, err
-					}
-					compSpec.Fields[target].GetListValue().Values[idx] = structpb.NewStructValue(converted)
-				}
-			}
-		}
-
-	} else {
-		if _, ok := compSpec.Fields["instillUIOrder"]; !ok {
-			compSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(0)
-		}
-		original := proto.Clone(compSpec).(*structpb.Struct)
-		delete(original.Fields, "title")
-		delete(original.Fields, "description")
-		delete(original.Fields, "instillShortDescription")
-		delete(original.Fields, "instillAcceptFormats")
-		delete(original.Fields, "instillUIOrder")
-		delete(original.Fields, "instillUpstreamTypes")
-
-		newCompSpec := &structpb.Struct{Fields: make(map[string]*structpb.Value)}
-
-		newCompSpec.Fields["title"] = structpb.NewStringValue(compSpec.Fields["title"].GetStringValue())
-		newCompSpec.Fields["description"] = structpb.NewStringValue(compSpec.Fields["description"].GetStringValue())
-		if _, ok := compSpec.Fields["instillShortDescription"]; ok {
-			newCompSpec.Fields["instillShortDescription"] = compSpec.Fields["instillShortDescription"]
-		} else {
-			newCompSpec.Fields["instillShortDescription"] = newCompSpec.Fields["description"]
-		}
-		newCompSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(compSpec.Fields["instillUIOrder"].GetNumberValue())
-		if compSpec.Fields["instillAcceptFormats"] != nil {
-			newCompSpec.Fields["instillAcceptFormats"] = structpb.NewListValue(compSpec.Fields["instillAcceptFormats"].GetListValue())
-		}
-		newCompSpec.Fields["instillUpstreamTypes"] = structpb.NewListValue(compSpec.Fields["instillUpstreamTypes"].GetListValue())
-		newCompSpec.Fields["anyOf"] = structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{}})
-
-		for _, v := range compSpec.Fields["instillUpstreamTypes"].GetListValue().GetValues() {
-			if v.GetStringValue() == "value" {
-				original.Fields["instillUpstreamType"] = v
-				newCompSpec.Fields["anyOf"].GetListValue().Values = append(newCompSpec.Fields["anyOf"].GetListValue().Values, structpb.NewStructValue(original))
-			}
-			if v.GetStringValue() == "reference" {
-				item, err := structpb.NewValue(
-					map[string]any{
-						"type":                "string",
-						"pattern":             "^\\{.*\\}$",
-						"instillUpstreamType": "reference",
-					},
-				)
+			case string, bool, float64, int64:
+				value, err := structpb.NewValue(val)
 				if err != nil {
 					return nil, err
 				}
-				newCompSpec.Fields["anyOf"].GetListValue().Values = append(newCompSpec.Fields["anyOf"].GetListValue().Values, item)
+				compSpec.Fields["patternProperties"].GetStructValue().Fields[k] = value
+			default:
+				return nil, fmt.Errorf("unsupported type: %T", v)
 			}
-			if v.GetStringValue() == "template" {
-				item, err := structpb.NewValue(
-					map[string]any{
-						"type":                "string",
-						"instillUpstreamType": "template",
-					},
-				)
-				if err != nil {
-					return nil, err
-				}
-				newCompSpec.Fields["anyOf"].GetListValue().Values = append(newCompSpec.Fields["anyOf"].GetListValue().Values, item)
-			}
-
 		}
-
-		compSpec = newCompSpec
-
 	}
+	for _, target := range []string{"allOf", "anyOf", "oneOf"} {
+		if _, ok := compSpec.Fields[target]; ok {
+			for idx, item := range compSpec.Fields[target].GetListValue().AsSlice() {
+				s, err := structpb.NewStruct(item.(map[string]any))
+				if err != nil {
+					return nil, err
+				}
+				converted, err := convertDataSpecToCompSpec(s)
+				if err != nil {
+					return nil, err
+				}
+				compSpec.Fields[target].GetListValue().Values[idx] = structpb.NewStructValue(converted)
+			}
+		}
+	}
+
+	if _, ok := compSpec.Fields["uiOrder"]; !ok {
+		compSpec.Fields["uiOrder"] = structpb.NewNumberValue(0)
+	}
+
 	return compSpec, nil
 }
 
@@ -260,8 +311,18 @@ func TaskIDToTitle(id string) string {
 	return cases.Title(language.English).String(title)
 }
 
-func generateComponentTaskCards(tasks []string, taskStructs map[string]*structpb.Struct) []*pb.ComponentTask {
-	taskCards := make([]*pb.ComponentTask, 0, len(tasks))
+const eventPrefix = "EVENT_"
+
+// EventIDToTitle builds a Event title from its ID. This is used when the `title`
+// key in the task definition isn't present.
+func EventIDToTitle(id string) string {
+	title := strings.ReplaceAll(id, eventPrefix, "")
+	title = strings.ReplaceAll(title, "_", " ")
+	return cases.Title(language.English).String(title)
+}
+
+func generateComponentTaskCards(tasks []string, taskStructs map[string]*structpb.Struct) []*pipelinepb.ComponentTask {
+	taskCards := make([]*pipelinepb.ComponentTask, 0, len(tasks))
 	for _, k := range tasks {
 		if v, ok := taskStructs[k]; ok {
 			title := v.Fields["title"].GetStringValue()
@@ -269,9 +330,12 @@ func generateComponentTaskCards(tasks []string, taskStructs map[string]*structpb
 				title = TaskIDToTitle(k)
 			}
 
-			description := taskStructs[k].Fields["instillShortDescription"].GetStringValue()
+			description := taskStructs[k].Fields["shortDescription"].GetStringValue()
+			if description == "" {
+				description = v.Fields["description"].GetStringValue()
+			}
 
-			taskCards = append(taskCards, &pb.ComponentTask{
+			taskCards = append(taskCards, &pipelinepb.ComponentTask{
 				Name:        k,
 				Title:       title,
 				Description: description,
@@ -282,10 +346,33 @@ func generateComponentTaskCards(tasks []string, taskStructs map[string]*structpb
 	return taskCards
 }
 
-func generateComponentSpec(title string, tasks []*pb.ComponentTask, taskStructs map[string]*structpb.Struct) (*structpb.Struct, error) {
+func generateComponentEventCards(events []string, eventStructs map[string]*structpb.Struct) []*pipelinepb.ComponentEvent {
+	eventCards := make([]*pipelinepb.ComponentEvent, 0, len(events))
+	for _, k := range events {
+		if v, ok := eventStructs[k]; ok {
+			title := v.Fields["title"].GetStringValue()
+			if title == "" {
+				title = TaskIDToTitle(k)
+			}
+
+			description := eventStructs[k].Fields["shortDescription"].GetStringValue()
+			if description == "" {
+				description = v.Fields["description"].GetStringValue()
+			}
+
+			eventCards = append(eventCards, &pipelinepb.ComponentEvent{
+				Name:        k,
+				Title:       title,
+				Description: description,
+			})
+		}
+	}
+	return eventCards
+}
+
+func generateComponentSpec(title string, tasks []*pipelinepb.ComponentTask, taskStructs map[string]*structpb.Struct) (*structpb.Struct, error) {
 	var err error
 	componentSpec := &structpb.Struct{Fields: map[string]*structpb.Value{}}
-	componentSpec.Fields["$schema"] = structpb.NewStringValue("http://json-schema.org/draft-07/schema#")
 	componentSpec.Fields["title"] = structpb.NewStringValue(fmt.Sprintf("%s Component", title))
 	componentSpec.Fields["type"] = structpb.NewStringValue("object")
 
@@ -312,7 +399,7 @@ func generateComponentSpec(title string, tasks []*pb.ComponentTask, taskStructs 
 		}
 
 		if task.Description != "" {
-			oneOf.Fields["properties"].GetStructValue().Fields["task"].GetStructValue().Fields["instillShortDescription"] = structpb.NewStringValue(task.Description)
+			oneOf.Fields["properties"].GetStructValue().Fields["task"].GetStructValue().Fields["shortDescription"] = structpb.NewStringValue(task.Description)
 		}
 		taskJSONStruct := proto.Clone(taskStructs[taskName]).(*structpb.Struct).Fields["input"].GetStructValue()
 
@@ -344,142 +431,87 @@ func generateComponentSpec(title string, tasks []*pb.ComponentTask, taskStructs 
 	}
 
 	return componentSpec, nil
-
 }
 
-func formatDataSpec(dataSpec *structpb.Struct) (*structpb.Struct, error) {
-	// var err error
-	compSpec := proto.Clone(dataSpec).(*structpb.Struct)
-	if compSpec == nil {
-		return compSpec, nil
+// EventJSON is the JSON for the event.
+type EventJSON map[string]Event
+
+// Event is the event for the component.
+type Event struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	ConfigSchema    any    `json:"configSchema"`
+	MessageSchema   any    `json:"messageSchema"`
+	MessageExamples []any  `json:"messageExamples"`
+}
+
+func generateEventSpecs(eventJSONBytes []byte) (map[string]*pipelinepb.EventSpecification, error) {
+
+	specs := map[string]*pipelinepb.EventSpecification{}
+	var j EventJSON
+	err := json.Unmarshal(eventJSONBytes, &j)
+	if err != nil {
+		return nil, err
 	}
-	if compSpec.Fields == nil {
-		compSpec.Fields = make(map[string]*structpb.Value)
-		return compSpec, nil
-	}
-	if _, ok := compSpec.Fields["const"]; ok {
-		return compSpec, nil
-	}
-
-	isFreeform := checkFreeForm(compSpec)
-
-	if _, ok := compSpec.Fields["type"]; !ok && !isFreeform {
-		return nil, fmt.Errorf("type missing: %+v", compSpec)
-	} else if compSpec.Fields["type"].GetStringValue() == "array" {
-
-		if _, ok := compSpec.Fields["instillUIOrder"]; !ok {
-			compSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(0)
-		}
-
-		converted, err := formatDataSpec(compSpec.Fields["items"].GetStructValue())
+	for t, e := range j {
+		c, err := json.Marshal(e.ConfigSchema)
 		if err != nil {
 			return nil, err
 		}
-		compSpec.Fields["items"] = structpb.NewStructValue(converted)
-	} else if compSpec.Fields["type"].GetStringValue() == "object" {
-
-		if _, ok := compSpec.Fields["instillUIOrder"]; !ok {
-			compSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(0)
-		}
-		if _, ok := compSpec.Fields["required"]; !ok {
-			return nil, fmt.Errorf("required missing: %+v", compSpec)
-		}
-		if _, ok := compSpec.Fields["instillEditOnNodeFields"]; !ok {
-			compSpec.Fields["instillEditOnNodeFields"] = compSpec.Fields["required"]
+		pbConfigSchema := &structpb.Struct{}
+		err = protojson.Unmarshal(c, pbConfigSchema)
+		if err != nil {
+			return nil, err
 		}
 
-		if _, ok := compSpec.Fields["properties"]; ok {
-			for k, v := range compSpec.Fields["properties"].GetStructValue().AsMap() {
-				s, err := structpb.NewStruct(v.(map[string]any))
-				if err != nil {
-					return nil, err
-				}
-				converted, err := formatDataSpec(s)
-				if err != nil {
-					return nil, err
-				}
-				compSpec.Fields["properties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
+		m, err := json.Marshal(e.MessageSchema)
+		if err != nil {
+			return nil, err
+		}
+		pbMessageSchema := &structpb.Struct{}
+		err = protojson.Unmarshal(m, pbMessageSchema)
+		if err != nil {
+			return nil, err
+		}
+		pbMessageExamples := make([]*structpb.Struct, 0, len(e.MessageExamples))
+		for _, ex := range e.MessageExamples {
+			pbMessageExample := &structpb.Struct{}
+			exs, err := json.Marshal(ex)
+			if err != nil {
+				return nil, err
 			}
-		}
-		if _, ok := compSpec.Fields["patternProperties"]; ok {
-			for k, v := range compSpec.Fields["patternProperties"].GetStructValue().AsMap() {
-				s, err := structpb.NewStruct(v.(map[string]any))
-				if err != nil {
-					return nil, err
-				}
-				converted, err := formatDataSpec(s)
-				if err != nil {
-					return nil, err
-				}
-				compSpec.Fields["patternProperties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
+			err = protojson.Unmarshal(exs, pbMessageExample)
+			if err != nil {
+				return nil, err
 			}
+			pbMessageExamples = append(pbMessageExamples, pbMessageExample)
 		}
-		for _, target := range []string{"allOf", "anyOf", "oneOf"} {
-			if _, ok := compSpec.Fields[target]; ok {
-				for idx, item := range compSpec.Fields[target].GetListValue().AsSlice() {
-					s, err := structpb.NewStruct(item.(map[string]any))
-					if err != nil {
-						return nil, err
-					}
-					converted, err := formatDataSpec(s)
-					if err != nil {
-						return nil, err
-					}
-					compSpec.Fields[target].GetListValue().AsSlice()[idx] = structpb.NewStructValue(converted)
-				}
-			}
+		specs[t] = &pipelinepb.EventSpecification{
+			Title:           e.Title,
+			Description:     e.Description,
+			ConfigSchema:    pbConfigSchema,
+			MessageSchema:   pbMessageSchema,
+			MessageExamples: pbMessageExamples,
 		}
-
-	} else {
-		if _, ok := compSpec.Fields["instillUIOrder"]; !ok {
-			compSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(0)
-		}
-
-		newCompSpec := &structpb.Struct{Fields: make(map[string]*structpb.Value)}
-
-		newCompSpec.Fields["type"] = structpb.NewStringValue(compSpec.Fields["type"].GetStringValue())
-		newCompSpec.Fields["title"] = structpb.NewStringValue(compSpec.Fields["title"].GetStringValue())
-		newCompSpec.Fields["description"] = structpb.NewStringValue(compSpec.Fields["description"].GetStringValue())
-		if _, ok := newCompSpec.Fields["instillShortDescription"]; ok {
-			newCompSpec.Fields["instillShortDescription"] = compSpec.Fields["instillShortDescription"]
-		} else {
-			newCompSpec.Fields["instillShortDescription"] = newCompSpec.Fields["description"]
-		}
-		newCompSpec.Fields["instillUIOrder"] = structpb.NewNumberValue(compSpec.Fields["instillUIOrder"].GetNumberValue())
-		if compSpec.Fields["instillFormat"] != nil {
-			newCompSpec.Fields["instillFormat"] = structpb.NewStringValue(compSpec.Fields["instillFormat"].GetStringValue())
-		}
-
-		compSpec = newCompSpec
-
 	}
-	return compSpec, nil
+	return specs, nil
 }
 
-func generateDataSpecs(tasks map[string]*structpb.Struct) (map[string]*pb.DataSpecification, error) {
+func generateDataSpecs(tasks map[string]*structpb.Struct) (map[string]*pipelinepb.DataSpecification, error) {
 
-	specs := map[string]*pb.DataSpecification{}
+	specs := map[string]*pipelinepb.DataSpecification{}
 	for k := range tasks {
-		spec := &pb.DataSpecification{}
-		var err error
+		spec := &pipelinepb.DataSpecification{}
 		taskJSONStruct := proto.Clone(tasks[k]).(*structpb.Struct)
-		spec.Input, err = formatDataSpec(taskJSONStruct.Fields["input"].GetStructValue())
-		if err != nil {
-			return nil, err
-		}
-		spec.Output, err = formatDataSpec(taskJSONStruct.Fields["output"].GetStructValue())
-		if err != nil {
-			return nil, err
-		}
+		spec.Input = taskJSONStruct.Fields["input"].GetStructValue()
+		spec.Output = taskJSONStruct.Fields["output"].GetStructValue()
 		specs[k] = spec
 	}
 
 	return specs, nil
 }
 
-func loadTasks(availableTasks []string, tasksJSONBytes []byte) ([]*pb.ComponentTask, map[string]*structpb.Struct, error) {
+func loadTasks(availableTasks []string, tasksJSONBytes []byte) ([]*pipelinepb.ComponentTask, map[string]*structpb.Struct, error) {
 
 	taskStructs := map[string]*structpb.Struct{}
 	var err error
@@ -501,6 +533,29 @@ func loadTasks(availableTasks []string, tasksJSONBytes []byte) ([]*pb.ComponentT
 	}
 	tasks := generateComponentTaskCards(availableTasks, taskStructs)
 	return tasks, taskStructs, nil
+}
+
+func loadEvents(availableEvents []string, eventsJSONBytes []byte) ([]*pipelinepb.ComponentEvent, error) {
+	eventStructs := map[string]*structpb.Struct{}
+	var err error
+
+	eventsJSONMap := map[string]map[string]any{}
+	err = json.Unmarshal(eventsJSONBytes, &eventsJSONMap)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, t := range availableEvents {
+		if v, ok := eventsJSONMap[t]; ok {
+			eventStructs[t], err = structpb.NewStruct(v)
+			if err != nil {
+				return nil, err
+			}
+
+		}
+	}
+	events := generateComponentEventCards(availableEvents, eventStructs)
+	return events, nil
 }
 
 // ConvertFromStructpb converts from structpb.Struct to a struct
@@ -533,6 +588,7 @@ func ConvertToStructpb(from any) (*structpb.Struct, error) {
 	return to, nil
 }
 
+// RenderJSON renders the JSON for the component.
 func RenderJSON(tasksJSONBytes []byte, additionalJSONBytes map[string][]byte) ([]byte, error) {
 	var err error
 	mp := provider.NewMap()
@@ -549,10 +605,6 @@ func RenderJSON(tasksJSONBytes []byte, additionalJSONBytes map[string][]byte) ([
 	}
 	res := jsonref.New()
 	err = res.AddProvider(mp)
-	if err != nil {
-		return nil, err
-	}
-	err = res.AddProvider(provider.NewHTTP())
 	if err != nil {
 		return nil, err
 	}
@@ -575,31 +627,6 @@ func RenderJSON(tasksJSONBytes []byte, additionalJSONBytes map[string][]byte) ([
 
 }
 
-// For formats such as `*`, `semi-structured/*`, and `semi-structured/json` we
-// treat them as freeform data. Thus, there is no need to set the `type` in the
-// JSON schema.
-func checkFreeForm(compSpec *structpb.Struct) bool {
-	acceptFormats := compSpec.Fields["instillAcceptFormats"].GetListValue().AsSlice()
-
-	formats := make([]any, 0, len(acceptFormats)+1) // This avoids reallocations when appending values to the slice.
-	formats = append(formats, acceptFormats...)
-
-	if instillFormat := compSpec.Fields["instillFormat"].GetStringValue(); instillFormat != "" {
-		formats = append(formats, instillFormat)
-	}
-	if len(formats) == 0 {
-		return true
-	}
-
-	for _, v := range formats {
-		if v.(string) == "*" || v.(string) == "semi-structured/*" || v.(string) == "semi-structured/json" {
-			return true
-		}
-	}
-
-	return false
-}
-
 // GetDefinitionID returns the component definition ID.
 func (c *Component) GetDefinitionID() string {
 	return c.definition.Id
@@ -619,20 +646,82 @@ func (c *Component) GetLogger() *zap.Logger {
 
 	return c.Logger
 }
-func (c *Component) GetDefinition(sysVars map[string]any, compConfig *ComponentConfig) (*pb.ComponentDefinition, error) {
-	return c.definition, nil
-}
 
-func (c *Component) GetTaskInputSchemas() map[string]string {
-	return c.taskInputSchemas
-}
-func (c *Component) GetTaskOutputSchemas() map[string]string {
-	return c.taskOutputSchemas
-}
+// GetDefinition returns the component definition.
+func (c *Component) GetDefinition(sysVars map[string]any, compConfig *ComponentConfig) (*pipelinepb.ComponentDefinition, error) {
 
-// LoadDefinition loads the component definitions from json files
-func (c *Component) LoadDefinition(definitionJSONBytes, setupJSONBytes, tasksJSONBytes []byte, additionalJSONBytes map[string][]byte) error {
 	var err error
+	definition := proto.Clone(c.definition).(*pipelinepb.ComponentDefinition)
+	definition.Spec.ComponentSpecification, err = convertFormatFields(definition.Spec.ComponentSpecification, true)
+	if err != nil {
+		return nil, err
+	}
+	for k := range definition.Spec.DataSpecifications {
+		definition.Spec.DataSpecifications[k].Input, err = convertFormatFields(definition.Spec.DataSpecifications[k].Input, false)
+		if err != nil {
+			return nil, err
+		}
+		definition.Spec.DataSpecifications[k].Output, err = convertFormatFields(definition.Spec.DataSpecifications[k].Output, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for k := range definition.Spec.EventSpecifications {
+		definition.Spec.EventSpecifications[k].ConfigSchema, err = convertFormatFields(definition.Spec.EventSpecifications[k].ConfigSchema, false)
+		if err != nil {
+			return nil, err
+		}
+		definition.Spec.EventSpecifications[k].MessageSchema, err = convertFormatFields(definition.Spec.EventSpecifications[k].MessageSchema, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return definition, nil
+}
+
+func convertYAMLToJSON(yamlBytes []byte) ([]byte, error) {
+	if yamlBytes == nil {
+		return nil, nil
+	}
+	var d any
+	err := yaml.Unmarshal(yamlBytes, &d)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(d)
+}
+
+// LoadDefinition loads the component definition, setup, tasks, events and additional JSON files.
+// The definition files are currently loaded together but could be refactored to load separately.
+func (c *Component) LoadDefinition(definitionYAMLBytes, setupYAMLBytes, tasksYAMLBytes, eventsYAMLBytes []byte, additionalYAMLBytes map[string][]byte) error {
+
+	var err error
+	definitionJSONBytes, err := convertYAMLToJSON(definitionYAMLBytes)
+	if err != nil {
+		return err
+	}
+	setupJSONBytes, err := convertYAMLToJSON(setupYAMLBytes)
+	if err != nil {
+		return err
+	}
+	eventsJSONBytes, err := convertYAMLToJSON(eventsYAMLBytes)
+	if err != nil {
+		return err
+	}
+	tasksJSONBytes, err := convertYAMLToJSON(tasksYAMLBytes)
+	if err != nil {
+		return err
+	}
+	additionalJSONBytes := map[string][]byte{}
+	for k, v := range additionalYAMLBytes {
+		v, err = convertYAMLToJSON(v)
+		if err != nil {
+			return err
+		}
+		additionalJSONBytes[k] = v
+	}
+
 	var definitionJSON any
 
 	c.secretFields = []string{}
@@ -656,24 +745,7 @@ func (c *Component) LoadDefinition(definitionJSONBytes, setupJSONBytes, tasksJSO
 		return err
 	}
 
-	c.taskInputSchemas = map[string]string{}
-	c.taskOutputSchemas = map[string]string{}
-	for k := range taskStructs {
-		var s []byte
-		s, err = protojson.Marshal(taskStructs[k].Fields["input"].GetStructValue())
-		if err != nil {
-			return err
-		}
-		c.taskInputSchemas[k] = string(s)
-
-		s, err = protojson.Marshal(taskStructs[k].Fields["output"].GetStructValue())
-		if err != nil {
-			return err
-		}
-		c.taskOutputSchemas[k] = string(s)
-	}
-
-	c.definition = &pb.ComponentDefinition{}
+	c.definition = &pipelinepb.ComponentDefinition{}
 	err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(definitionJSONBytes, c.definition)
 	if err != nil {
 		return err
@@ -682,7 +754,7 @@ func (c *Component) LoadDefinition(definitionJSONBytes, setupJSONBytes, tasksJSO
 	c.definition.Name = fmt.Sprintf("component-definitions/%s", c.definition.Id)
 	c.definition.Tasks = tasks
 	if c.definition.Spec == nil {
-		c.definition.Spec = &pb.ComponentDefinition_Spec{}
+		c.definition.Spec = &pipelinepb.ComponentDefinition_Spec{}
 	}
 	c.definition.Spec.ComponentSpecification, err = generateComponentSpec(c.definition.Title, tasks, taskStructs)
 	if err != nil {
@@ -712,14 +784,28 @@ func (c *Component) LoadDefinition(definitionJSONBytes, setupJSONBytes, tasksJSO
 
 	}
 
+	if eventsJSONBytes != nil {
+		availableEvents := []string{}
+		for _, availableEvent := range definitionJSON.(map[string]any)["availableEvents"].([]any) {
+			availableEvents = append(availableEvents, availableEvent.(string))
+		}
+		events, err := loadEvents(availableEvents, eventsJSONBytes)
+		if err != nil {
+			return err
+		}
+		c.definition.Events = events
+		c.definition.Spec.EventSpecifications, err = generateEventSpecs(eventsJSONBytes)
+		if err != nil {
+			return err
+		}
+	}
+
 	c.definition.Spec.DataSpecifications, err = generateDataSpecs(taskStructs)
 	if err != nil {
 		return err
 	}
 
 	c.initSecretField(c.definition)
-	c.initInputAcceptFormatsFields()
-	c.initOutputFormatsFields()
 
 	return nil
 
@@ -728,42 +814,15 @@ func (c *Component) LoadDefinition(definitionJSONBytes, setupJSONBytes, tasksJSO
 func (c *Component) refineResourceSpec(resourceSpec *structpb.Struct) (*structpb.Struct, error) {
 
 	spec := proto.Clone(resourceSpec).(*structpb.Struct)
-	if _, ok := spec.Fields["instillShortDescription"]; !ok {
-		spec.Fields["instillShortDescription"] = structpb.NewStringValue(spec.Fields["description"].GetStringValue())
+	if _, ok := spec.Fields["shortDescription"]; !ok {
+		spec.Fields["shortDescription"] = structpb.NewStringValue(spec.Fields["description"].GetStringValue())
 	}
 
 	if _, ok := spec.Fields["properties"]; ok {
 		for k, v := range spec.Fields["properties"].GetStructValue().AsMap() {
-			s, err := structpb.NewStruct(v.(map[string]any))
-			if err != nil {
-				return nil, err
-			}
-			converted, err := c.refineResourceSpec(s)
-			if err != nil {
-				return nil, err
-			}
-			spec.Fields["properties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
-		}
-	}
-	if _, ok := spec.Fields["patternProperties"]; ok {
-		for k, v := range spec.Fields["patternProperties"].GetStructValue().AsMap() {
-			s, err := structpb.NewStruct(v.(map[string]any))
-			if err != nil {
-				return nil, err
-			}
-			converted, err := c.refineResourceSpec(s)
-			if err != nil {
-				return nil, err
-			}
-			spec.Fields["patternProperties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
-
-		}
-	}
-	for _, target := range []string{"allOf", "anyOf", "oneOf"} {
-		if _, ok := spec.Fields[target]; ok {
-			for idx, item := range spec.Fields[target].GetListValue().AsSlice() {
-				s, err := structpb.NewStruct(item.(map[string]any))
+			switch val := v.(type) {
+			case map[string]any:
+				s, err := structpb.NewStruct(val)
 				if err != nil {
 					return nil, err
 				}
@@ -771,7 +830,68 @@ func (c *Component) refineResourceSpec(resourceSpec *structpb.Struct) (*structpb
 				if err != nil {
 					return nil, err
 				}
-				spec.Fields[target].GetListValue().AsSlice()[idx] = structpb.NewStructValue(converted)
+				spec.Fields["properties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
+			case string, bool, float64, int64:
+				// Handle primitive types directly
+				value, err := structpb.NewValue(val)
+				if err != nil {
+					return nil, err
+				}
+				spec.Fields["properties"].GetStructValue().Fields[k] = value
+			default:
+				return nil, fmt.Errorf("unsupported type: %T", v)
+			}
+		}
+	}
+	if _, ok := spec.Fields["patternProperties"]; ok {
+		for k, v := range spec.Fields["patternProperties"].GetStructValue().AsMap() {
+			switch val := v.(type) {
+			case map[string]any:
+				s, err := structpb.NewStruct(val)
+				if err != nil {
+					return nil, err
+				}
+				converted, err := c.refineResourceSpec(s)
+				if err != nil {
+					return nil, err
+				}
+				spec.Fields["patternProperties"].GetStructValue().Fields[k] = structpb.NewStructValue(converted)
+			case string, bool, float64, int64:
+				// Handle primitive types directly
+				value, err := structpb.NewValue(val)
+				if err != nil {
+					return nil, err
+				}
+				spec.Fields["patternProperties"].GetStructValue().Fields[k] = value
+			default:
+				return nil, fmt.Errorf("unsupported type: %T", v)
+			}
+		}
+	}
+	for _, target := range []string{"allOf", "anyOf", "oneOf"} {
+		if _, ok := spec.Fields[target]; ok {
+			for idx, item := range spec.Fields[target].GetListValue().AsSlice() {
+				switch val := item.(type) {
+				case map[string]any:
+					s, err := structpb.NewStruct(val)
+					if err != nil {
+						return nil, err
+					}
+					converted, err := c.refineResourceSpec(s)
+					if err != nil {
+						return nil, err
+					}
+					spec.Fields[target].GetListValue().AsSlice()[idx] = structpb.NewStructValue(converted)
+				case string, bool, float64, int64:
+					// Handle primitive types directly
+					value, err := structpb.NewValue(val)
+					if err != nil {
+						return nil, err
+					}
+					spec.Fields[target].GetListValue().AsSlice()[idx] = value
+				default:
+					return nil, fmt.Errorf("unsupported type: %T", item)
+				}
 			}
 		}
 	}
@@ -794,7 +914,7 @@ func (c *Component) ListSecretFields() ([]string, error) {
 	return c.secretFields, nil
 }
 
-func (c *Component) initSecretField(def *pb.ComponentDefinition) {
+func (c *Component) initSecretField(def *pipelinepb.ComponentDefinition) {
 	if c.secretFields == nil {
 		c.secretFields = []string{}
 	}
@@ -838,101 +958,6 @@ func (c *Component) SupportsOAuth() bool {
 	return false
 }
 
-func (c *Component) ListInputAcceptFormatsFields() (map[string]map[string][]string, error) {
-	return c.inputAcceptFormatsFields, nil
-}
-
-func (c *Component) initInputAcceptFormatsFields() {
-	inputAcceptFormatsFields := map[string]map[string][]string{}
-
-	for task, sch := range c.GetTaskInputSchemas() {
-		inputAcceptFormatsFields[task] = map[string][]string{}
-		input := &structpb.Struct{}
-		_ = protojson.Unmarshal([]byte(sch), input)
-		inputAcceptFormatsFields[task] = c.traverseInputAcceptFormatsFields(input.GetFields()["properties"], "", inputAcceptFormatsFields[task])
-		if l, ok := input.GetFields()["oneOf"]; ok {
-			for _, v := range l.GetListValue().Values {
-				inputAcceptFormatsFields[task] = c.traverseInputAcceptFormatsFields(v.GetStructValue().GetFields()["properties"], "", inputAcceptFormatsFields[task])
-			}
-		}
-		c.inputAcceptFormatsFields = inputAcceptFormatsFields
-	}
-
-}
-
-func (c *Component) traverseInputAcceptFormatsFields(input *structpb.Value, prefix string, inputAcceptFormatsFields map[string][]string) map[string][]string {
-	// fmt.Println("input", input)
-	for key, v := range input.GetStructValue().GetFields() {
-
-		if v, ok := v.GetStructValue().GetFields()["instillAcceptFormats"]; ok {
-			for _, f := range v.GetListValue().Values {
-				k := fmt.Sprintf("%s%s", prefix, key)
-				inputAcceptFormatsFields[k] = append(inputAcceptFormatsFields[k], f.GetStringValue())
-			}
-		}
-		if tp, ok := v.GetStructValue().GetFields()["type"]; ok {
-			if tp.GetStringValue() == "object" {
-				if l, ok := v.GetStructValue().GetFields()["oneOf"]; ok {
-					for _, v := range l.GetListValue().Values {
-						inputAcceptFormatsFields = c.traverseInputAcceptFormatsFields(v.GetStructValue().GetFields()["properties"], fmt.Sprintf("%s%s.", prefix, key), inputAcceptFormatsFields)
-					}
-				}
-				inputAcceptFormatsFields = c.traverseInputAcceptFormatsFields(v.GetStructValue().GetFields()["properties"], fmt.Sprintf("%s%s.", prefix, key), inputAcceptFormatsFields)
-			}
-
-		}
-	}
-
-	return inputAcceptFormatsFields
-}
-
-func (c *Component) ListOutputFormatsFields() (map[string]map[string]string, error) {
-	return c.outputFormatsFields, nil
-}
-
-func (c *Component) initOutputFormatsFields() {
-	outputFormatsFields := map[string]map[string]string{}
-
-	for task, sch := range c.GetTaskOutputSchemas() {
-		outputFormatsFields[task] = map[string]string{}
-		output := &structpb.Struct{}
-		_ = protojson.Unmarshal([]byte(sch), output)
-		outputFormatsFields[task] = c.traverseOutputFormatsFields(output.GetFields()["properties"], "", outputFormatsFields[task])
-		if l, ok := output.GetFields()["oneOf"]; ok {
-			for _, v := range l.GetListValue().Values {
-				outputFormatsFields[task] = c.traverseOutputFormatsFields(v.GetStructValue().GetFields()["properties"], "", outputFormatsFields[task])
-			}
-		}
-		c.outputFormatsFields = outputFormatsFields
-
-	}
-
-}
-
-func (c *Component) traverseOutputFormatsFields(input *structpb.Value, prefix string, outputFormatsFields map[string]string) map[string]string {
-	// fmt.Println("input", input)
-	for key, v := range input.GetStructValue().GetFields() {
-
-		if v, ok := v.GetStructValue().GetFields()["instillFormat"]; ok {
-			k := fmt.Sprintf("%s%s", prefix, key)
-			outputFormatsFields[k] = v.GetStringValue()
-		}
-		if tp, ok := v.GetStructValue().GetFields()["type"]; ok {
-			if tp.GetStringValue() == "object" {
-				if l, ok := v.GetStructValue().GetFields()["oneOf"]; ok {
-					for _, v := range l.GetListValue().Values {
-						outputFormatsFields = c.traverseOutputFormatsFields(v.GetStructValue().GetFields()["properties"], fmt.Sprintf("%s%s.", prefix, key), outputFormatsFields)
-					}
-				}
-				outputFormatsFields = c.traverseOutputFormatsFields(v.GetStructValue().GetFields()["properties"], fmt.Sprintf("%s%s.", prefix, key), outputFormatsFields)
-			}
-
-		}
-	}
-
-	return outputFormatsFields
-}
-
 // UsageHandlerCreator returns a function to initialize a UsageHandler. If the
 // component doesn't have such function initialized, a no-op usage handler
 // creator is returned.
@@ -944,6 +969,7 @@ func (c *Component) UsageHandlerCreator() UsageHandlerCreator {
 	return c.NewUsageHandler
 }
 
+// Test is not implemented for the base component.
 func (c *Component) Test(sysVars map[string]any, setup *structpb.Struct) error {
 	return nil
 }
@@ -964,6 +990,7 @@ func ReadFromGlobalConfig(key string, secrets map[string]any) string {
 	return ""
 }
 
+// ComponentConfig is the config for the component.
 type ComponentConfig struct {
 	Task  string
 	Input map[string]any

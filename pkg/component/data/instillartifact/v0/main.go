@@ -12,26 +12,25 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
 
-	artifactPB "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
 )
 
 const (
-	taskUploadFile        string = "TASK_UPLOAD_FILE"
-	taskUploadFiles       string = "TASK_UPLOAD_FILES"
+	taskCreateFile        string = "TASK_CREATE_FILE"
+	taskCreateFiles       string = "TASK_CREATE_FILES"
 	taskGetFilesMetadata  string = "TASK_GET_FILES_METADATA"
 	taskGetChunksMetadata string = "TASK_GET_CHUNKS_METADATA"
 	taskGetFileInMarkdown string = "TASK_GET_FILE_IN_MARKDOWN"
 	taskMatchFileStatus   string = "TASK_MATCH_FILE_STATUS"
-	taskSearchChunks      string = "TASK_RETRIEVE"
-	taskQuery             string = "TASK_ASK"
+	taskSearchChunks      string = "TASK_SEARCH"
 	taskSyncFiles         string = "TASK_SYNC_FILES"
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 	once      sync.Once
 	comp      *component
 )
@@ -44,7 +43,7 @@ type execution struct {
 	base.ComponentExecution
 
 	execute    func(*structpb.Struct) (*structpb.Struct, error)
-	client     artifactPB.ArtifactPublicServiceClient
+	client     artifactpb.ArtifactPublicServiceClient
 	connection Connection
 }
 
@@ -52,7 +51,7 @@ type execution struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, nil, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, nil, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -73,9 +72,9 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 	e.client, e.connection = client, connection
 
 	switch x.Task {
-	case taskUploadFile:
+	case taskCreateFile:
 		e.execute = e.uploadFile
-	case taskUploadFiles:
+	case taskCreateFiles:
 		e.execute = e.uploadFiles
 	case taskGetFilesMetadata:
 		e.execute = e.getFilesMetadata
@@ -87,8 +86,6 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 		e.execute = e.matchFileStatus
 	case taskSearchChunks:
 		e.execute = e.searchChunks
-	case taskQuery:
-		e.execute = e.query
 	case taskSyncFiles:
 		e.execute = e.syncFiles
 	default:

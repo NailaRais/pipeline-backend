@@ -11,16 +11,17 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
-	"github.com/instill-ai/x/errmsg"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/setup.json
-	setupJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/setup.yaml
+	setupYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -47,7 +48,7 @@ type execution struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -75,7 +76,7 @@ func (c *component) CreateExecution(x base.ComponentExecution) (base.IExecution,
 	case TaskAsanaProject:
 		e.execute = e.client.ProjectRelatedTask
 	default:
-		return nil, errmsg.AddMessage(
+		return nil, errorsx.AddMessage(
 			fmt.Errorf("not supported task: %s", x.Task),
 			fmt.Sprintf("%s task is not supported.", x.Task),
 		)
@@ -90,12 +91,8 @@ func (e *execution) Execute(ctx context.Context, jobs []*base.Job) error {
 			job.Error.Error(ctx, err)
 			continue
 		}
+		// TODO: migrate to new interface with default value
 
-		// TODO: use FillInDefaultValues for all components
-		if _, err := e.FillInDefaultValues(input); err != nil {
-			job.Error.Error(ctx, err)
-			continue
-		}
 		action := input
 		if input.GetFields()["action"].GetStringValue() == "" {
 			action = input.GetFields()["action"].GetStructValue()

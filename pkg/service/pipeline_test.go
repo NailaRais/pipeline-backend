@@ -8,16 +8,23 @@ import (
 	"github.com/go-redis/redismock/v9"
 	"github.com/gofrs/uuid"
 	"github.com/gojuno/minimock/v3"
+	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/client"
 
 	"github.com/instill-ai/pipeline-backend/config"
+	"github.com/instill-ai/pipeline-backend/pkg/acl"
 	"github.com/instill-ai/pipeline-backend/pkg/datamodel"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 	"github.com/instill-ai/pipeline-backend/pkg/memory"
 	"github.com/instill-ai/pipeline-backend/pkg/mock"
+	"github.com/instill-ai/pipeline-backend/pkg/repository"
 	"github.com/instill-ai/pipeline-backend/pkg/resource"
+	"github.com/instill-ai/x/minio"
 
 	componentstore "github.com/instill-ai/pipeline-backend/pkg/component/store"
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	mgmtpb "github.com/instill-ai/protogen-go/core/mgmt/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
 )
 
 func fakeNamespace() resource.Namespace {
@@ -63,21 +70,22 @@ func TestService_UpdateNamespacePipelineByID(t *testing.T) {
 	converter := mock.NewConverterMock(mc)
 	mgmtPrivateClient := mock.NewMgmtPrivateServiceClientMock(mc)
 
-	compStore := componentstore.Init(nil, config.Config.Component.Secrets, nil)
+	compStore := componentstore.Init(componentstore.InitParams{
+		Secrets:       config.Config.Component.Secrets,
+		BinaryFetcher: external.NewBinaryFetcher(),
+	})
 
-	workerUID, _ := uuid.NewV4()
-	service := NewService(
-		repo,
-		redisClient,
-		temporalClient,
-		aclClient,
-		converter,
-		mgmtPrivateClient,
-		nil,
-		compStore,
-		memory.NewMemoryStore(),
-		workerUID,
-		nil,
+	service := newService(
+		serviceConfig{
+			repository:               repo,
+			redisClient:              redisClient,
+			temporalClient:           temporalClient,
+			aCLClient:                aclClient,
+			converter:                converter,
+			mgmtPrivateServiceClient: mgmtPrivateClient,
+			componentStore:           compStore,
+			memory:                   memory.NewStore(nil, nil),
+		},
 	)
 
 	aclClient.CheckPermissionMock.Return(true, nil)
@@ -88,12 +96,14 @@ func TestService_UpdateNamespacePipelineByID(t *testing.T) {
 
 	repo.GetNamespacePipelineByIDMock.Return(&dataPipeline, nil)
 	repo.UpdateNamespacePipelineByUIDMock.Return(nil)
+	repo.GetPipelineByUIDMock.Return(&dataPipeline, nil)
 	repo.DeletePipelineTagsMock.Expect(ctx, uid, []string{"tag3"}).Return(nil)
 	repo.CreatePipelineTagsMock.Expect(ctx, uid, []string{"tag2"}).Return(nil)
+	repo.ListPipelineRunOnsMock.Expect(ctx, uid).Return(repository.PipelineRunOnList{}, nil)
 
 	converter.ConvertPipelineToDBMock.Return(&newDataPipeline, nil)
 
-	pbPipeline := pb.Pipeline{
+	pbPipeline := pipelinepb.Pipeline{
 		Id:   "pipelineID",
 		Name: "pipelineName",
 		Tags: []string{"tag1", "tag2"},
@@ -109,4 +119,45 @@ func TestService_UpdateNamespacePipelineByID(t *testing.T) {
 
 	c.Assert(err, quicktest.IsNil)
 	c.Assert(updatedPbPipeline, quicktest.IsNotNil)
+}
+
+type serviceConfig struct {
+	repository                   repository.Repository
+	redisClient                  *redis.Client
+	temporalClient               client.Client
+	aCLClient                    acl.ACLClientInterface
+	converter                    Converter
+	mgmtPublicServiceClient      mgmtpb.MgmtPublicServiceClient
+	mgmtPrivateServiceClient     mgmtpb.MgmtPrivateServiceClient
+	minioClient                  minio.Client
+	componentStore               *componentstore.Store
+	memory                       *memory.Store
+	retentionHandler             MetadataRetentionHandler
+	binaryFetcher                external.BinaryFetcher
+	artifactPublicServiceClient  artifactpb.ArtifactPublicServiceClient
+	artifactPrivateServiceClient artifactpb.ArtifactPrivateServiceClient
+}
+
+// newService is a compact helper to instantiate a new service, which allows us
+// to only define the dependencies we'll use in a test. This approach shouldn't
+// be used in production code, where we want every dependency to be injected
+// every time, so we rely on the compiler to guard us against missing
+// dependency injections.
+func newService(cfg serviceConfig) Service {
+	return NewService(
+		cfg.repository,
+		cfg.redisClient,
+		cfg.temporalClient,
+		cfg.aCLClient,
+		cfg.converter,
+		cfg.mgmtPublicServiceClient,
+		cfg.mgmtPrivateServiceClient,
+		cfg.minioClient,
+		cfg.componentStore,
+		cfg.memory,
+		cfg.retentionHandler,
+		cfg.binaryFetcher,
+		cfg.artifactPublicServiceClient,
+		cfg.artifactPrivateServiceClient,
+	)
 }

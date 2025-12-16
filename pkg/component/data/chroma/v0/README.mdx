@@ -2,7 +2,7 @@
 title: "Chroma"
 lang: "en-US"
 draft: false
-description: "Learn about how to set up a VDP Chroma component https://github.com/instill-ai/instill-core"
+description: "Learn about how to set up a Chroma component https://github.com/instill-ai/instill-core"
 ---
 
 The Chroma component is a data component that allows users to build and search vector datasets.
@@ -14,19 +14,13 @@ It can carry out the following tasks:
 - [Create Collection](#create-collection)
 - [Delete Collection](#delete-collection)
 
-
-
 ## Release Stage
 
 `Alpha`
 
-
-
 ## Configuration
 
-The component definition and tasks are defined in the [definition.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/data/chroma/v0/config/definition.json) and [tasks.json](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/data/chroma/v0/config/tasks.json) files respectively.
-
-
+The component definition and tasks are defined in the [definition.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/data/chroma/v0/config/definition.yaml) and [tasks.yaml](https://github.com/instill-ai/pipeline-backend/blob/main/pkg/component/data/chroma/v0/config/tasks.yaml) files respectively.
 
 
 ## Setup
@@ -35,7 +29,7 @@ The component definition and tasks are defined in the [definition.json](https://
 In order to communicate with Chroma, the following connection details need to be
 provided. You may specify them directly in a pipeline recipe as key-value pairs
 within the component's `setup` block, or you can create a **Connection** from
-the [**Integration Settings**](https://www.instill.tech/docs/vdp/integration)
+the [**Integration Settings**](https://docs.instill-ai.com/docs/set-up-component)
 page and reference the whole `setup` as `setup:
 ${connection.<my-connection-id>}`.
 
@@ -43,11 +37,9 @@ ${connection.<my-connection-id>}`.
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| API Key (required) | `api-key` | string | Fill in your Chroma API key  |
-| Chroma URL Endpoint (required) | `url` | string | Fill in your Chroma hosted public URL endpoint with port, e.g http://1.2.3:8000  |
-
+| API Key (required) | `api-key` | string | Fill in your Chroma API key. |
+| Chroma URL Endpoint (required) | `url` | string | Fill in your Chroma hosted public URL endpoint with port, e.g http://1.2.3:8000. |
 </div>
-
 
 
 
@@ -59,27 +51,25 @@ Upsert multiple vector items into a collection, existing items will be updated
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_BATCH_UPSERT` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to upsert the item into |
-| Array ID (required) | `array-id` | array[string] | The array of id |
-| [Array Metadata](#batch-upsert-array-metadata) (required) | `array-metadata` | array[object] | The array of vector metadata |
-| Array Vector (required) | `array-vector` | array[array] | The array of vector values |
-| Array Document | `array-document` | array[string] | The array of document string values |
-| Array URI | `array-uri` | array[string] | The array of uri |
+| Collection Name (required) | `collection-name` | string | The name of the collection to upsert the item into. |
+| Array ID (required) | `array-id` | array[string] | The array of id. |
+| [Array Metadata](#batch-upsert-array-metadata) (required) | `array-metadata` | array[object] | The array of vector metadata. |
+| Array Vector (required) | `array-vector` | array[array] | The array of vector values. |
+| Array Document | `array-document` | array[string] | The array of document string values. |
+| Array URI | `array-uri` | array[string] | The array of uri. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Status | `status` | string | Batch add status |
+| Status | `status` | string | Batch add status. |
+
 </div>
 
 ### Upsert
@@ -88,27 +78,25 @@ Upsert a vector item into a collection, existing item will be updated
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_UPSERT` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to upsert the item into |
-| ID (required) | `id` | string | The ID of the item |
-| Metadata (required) | `metadata` | object | The vector metadata |
-| Vector (required) | `vector` | array[number] | An array of dimensions for the vector value |
-| Document | `document` | string | The document string value |
-| URI | `uri` | string | The uri of the item |
+| Collection Name (required) | `collection-name` | string | The name of the collection to upsert the item into. |
+| ID (required) | `id` | string | The ID of the item. |
+| Metadata (required) | `metadata` | object | The vector metadata. |
+| Vector (required) | `vector` | array[number] | An array of dimensions for the vector value. |
+| Document | `document` | string | The document string value. |
+| URI | `uri` | string | The uri of the item. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Status | `status` | string | Add status |
+| Status | `status` | string | Add status. |
+
 </div>
 
 ### Query
@@ -117,29 +105,28 @@ Perform a vector search on a collection
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_QUERY` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to perform vector similarity search on |
+| Collection Name (required) | `collection-name` | string | The name of the collection to perform vector similarity search on. |
 | Vector (required) | `vector` | array[number] | An array of dimensions for the vector query. |
-| N Results (required) | `n-results` | integer | The N amount of items to return from the vector search operation |
-| Filter | `filter` | object | The metadata filter to be applied to the data with Chroma where filter, please refer to [using-where-filters](https://docs.trychroma.com/guides#using-where-filters) |
-| Filter Document | `filter-document` | string | The document content filter to be applied to the data, please refer to [filtering-by-document-contents](https://docs.trychroma.com/guides#filtering-by-document-contents) |
-| Fields | `fields` | array[string] | The fields to be returned from the vector search operation |
+| N Results (required) | `n-results` | integer | The N amount of items to return from the vector search operation. |
+| Filter | `filter` | object | The metadata filter to be applied to the data with Chroma where filter, please refer to [using-where-filters](https://docs.trychroma.com/guides#using-where-filters). |
+| Filter Document | `filter-document` | string | The document content filter to be applied to the data, please refer to [filtering-by-document-contents](https://docs.trychroma.com/guides#filtering-by-document-contents). |
+| Fields | `fields` | array[string] | The fields to be returned from the vector search operation. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| [Result](#query-result) | `result` | object | Result of the vector search operation |
-| Status | `status` | string | Vector search status |
+| [Result](#query-result) | `result` | object | Result of the vector search operation. |
+| Status | `status` | string | Vector search status. |
+
 </div>
+
 
 <details>
 <summary> Output Objects in Query</summary>
@@ -150,12 +137,14 @@ Perform a vector search on a collection
 
 | Field | Field ID | Type | Note |
 | :--- | :--- | :--- | :--- |
-| IDs | `ids` | array | The ids returned from the vector search operation |
-| [Items](#query-items) | `items` | array | The items returned from the vector search operation |
-| [Metadata](#query-metadata) | `metadata` | array | The metadata returned from the vector search operation |
-| Vectors | `vectors` | array | The vectors returned from the vector search operation |
+| IDs | `ids` | array | The ids returned from the vector search operation. |
+| [Items](#query-items) | `items` | array | The items returned from the vector search operation. |
+| [Metadata](#query-metadata) | `metadata` | array | The metadata returned from the vector search operation. |
+| Vectors | `vectors` | array | The vectors returned from the vector search operation. |
+
 </div>
 </details>
+
 
 ### Delete
 
@@ -163,25 +152,23 @@ Delete vector items from a collection
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_DELETE` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to delete the object from |
-| ID | `id` | string | The ID of the item |
-| Filter | `filter` | object | The metadata filter to be applied to the data with Chroma where filter, please refer to [using-where-filters](https://docs.trychroma.com/guides#using-where-filters) |
-| Filter Document | `filter-document` | string | The document content filter to be applied to the data, please refer to [filtering-by-document-contents](https://docs.trychroma.com/guides#filtering-by-document-contents) |
+| Collection Name (required) | `collection-name` | string | The name of the collection to delete the object from. |
+| ID | `id` | string | The ID of the item. |
+| Filter | `filter` | object | The metadata filter to be applied to the data with Chroma where filter, please refer to [using-where-filters](https://docs.trychroma.com/guides#using-where-filters). |
+| Filter Document | `filter-document` | string | The document content filter to be applied to the data, please refer to [filtering-by-document-contents](https://docs.trychroma.com/guides#filtering-by-document-contents). |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Status | `status` | string | Delete status |
+| Status | `status` | string | Delete status. |
+
 </div>
 
 ### Create Collection
@@ -190,25 +177,23 @@ Create a collection
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_CREATE_COLLECTION` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to create |
-| Config | `metadata` | object | The metadata of the collection. Please refer to [creating-inspecting-and-deleting-collection](https://docs.trychroma.com/guides#creating,-inspecting,-and-deleting-collections) |
-| Configuration | `configuration` | object | The configuration of the collection. Please refer to [creating-inspecting-and-deleting-collection](https://docs.trychroma.com/guides#creating,-inspecting,-and-deleting-collections) |
-| Get or Create | `get-or-create` | boolean | If true, the collection will be created if it does not exist |
+| Collection Name (required) | `collection-name` | string | The name of the collection to create. |
+| Config | `metadata` | object | The metadata of the collection. Please refer to [creating-inspecting-and-deleting-collection](https://docs.trychroma.com/guides#creating,-inspecting,-and-deleting-collections). |
+| Configuration | `configuration` | object | The configuration of the collection. Please refer to [creating-inspecting-and-deleting-collection](https://docs.trychroma.com/guides#creating,-inspecting,-and-deleting-collections). |
+| Get or Create | `get-or-create` | boolean | If true, the collection will be created if it does not exist. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Status | `status` | string | Create collection status |
+| Status | `status` | string | Create collection status. |
+
 </div>
 
 ### Delete Collection
@@ -217,22 +202,18 @@ Delete a collection
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Input | ID | Type | Description |
+| Input | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
 | Task ID (required) | `task` | string | `TASK_DELETE_COLLECTION` |
-| Collection Name (required) | `collection-name` | string | The name of the collection to delete |
+| Collection Name (required) | `collection-name` | string | The name of the collection to delete. |
+
 </div>
-
-
-
-
 
 
 <div class="markdown-col-no-wrap" data-col-1 data-col-2>
 
-| Output | ID | Type | Description |
+| Output | Field ID | Type | Description |
 | :--- | :--- | :--- | :--- |
-| Status | `status` | string | Delete collection status |
+| Status | `status` | string | Delete collection status. |
+
 </div>
-
-

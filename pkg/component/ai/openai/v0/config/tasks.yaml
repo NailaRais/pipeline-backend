@@ -1,0 +1,773 @@
+$defs:
+  chat-message:
+    properties:
+      content:
+        $ref: schema.yaml#/$defs/instill-types/multi-modal-content
+        description: The message content.
+        uiOrder: 1
+        title: Content
+      role:
+        description: The message role, i.e. 'system', 'user' or 'assistant'.
+        uiOrder: 0
+        title: Role
+        type: string
+    required:
+      - role
+      - content
+    title: Chat Message
+    type: object
+TASK_SPEECH_RECOGNITION:
+  shortDescription: Turn audio into text.
+  input:
+    uiOrder: 0
+    properties:
+      audio:
+        description: >-
+          The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.
+        type: audio/*
+        uiOrder: 1
+        title: Audio
+      language:
+        description: >-
+          The language of the input audio. Supplying the input language in <a href="https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes">ISO-639-1</a>
+          format will improve accuracy and latency.
+        type: string
+        shortDescription: The language of the input audio.
+        uiOrder: 3
+        title: Language
+      model:
+        description: >-
+          ID of the model to use. Only `whisper-1` is currently available.
+        enum:
+          - whisper-1
+        example: whisper-1
+        type: string
+        shortDescription: ID of the model to use
+        uiOrder: 0
+        instillCredentialMap:
+          values:
+            - whisper-1
+          targets:
+            - setup.api-key
+        title: Model
+      prompt:
+        description: >-
+          An optional text to guide the model's style or continue a previous audio segment. The prompt should match the audio language.
+        type: string
+        shortDescription: An optional text to guide the model's style or continue a previous audio segment.
+        uiOrder: 2
+        title: Prompt
+      temperature:
+        default: 0
+        description: >-
+          The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will
+          make it more focused and deterministic. If set to 0, the model will use <a href="https://en.wikipedia.org/wiki/Log_probability">log probability</a>
+          to automatically increase the temperature until certain thresholds are hit.
+        type: number
+        shortDescription: The sampling temperature, between 0 and 1.
+        uiOrder: 4
+        title: Temperature
+    required:
+      - audio
+      - model
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      text:
+        description: Generated text.
+        uiOrder: 0
+        title: Text
+        type: string
+    required:
+      - text
+    title: Output
+    type: object
+TASK_TEXT_EMBEDDINGS:
+  shortDescription: Turn text into numbers, unlocking use cases like search.
+  input:
+    uiOrder: 0
+    properties:
+      model:
+        description: ID of the model to use.
+        enum:
+          - text-embedding-ada-002
+          - text-embedding-3-small
+          - text-embedding-3-large
+        example: text-embedding-3-small
+        type: string
+        shortDescription: ID of the model to use
+        uiOrder: 0
+        instillCredentialMap:
+          values:
+            - text-embedding-3-small
+            - text-embedding-3-large
+          targets:
+            - setup.api-key
+        title: Model
+      text:
+        description: The text.
+        type: string
+        uiOrder: 1
+        title: Text
+      dimensions:
+        description: The number of dimensions the resulting output embeddings should have. Only supported in text-embedding-3 and later models.
+        type: integer
+        uiOrder: 2
+        title: Dimensions
+    required:
+      - text
+      - model
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      embedding:
+        $ref: schema.yaml#/$defs/instill-types/embedding
+        description: Embedding of the input text.
+        uiOrder: 0
+        title: Embedding
+    required:
+      - embedding
+    title: Output
+    type: object
+TASK_TEXT_GENERATION:
+  shortDescription: Provide text outputs in response to their inputs.
+  description: >-
+    OpenAI's text generation models (often called generative pre-trained transformers or large language models) have been trained to understand
+    natural language, code, and images. The models provide text outputs in response to their inputs. The inputs to these models are also referred to as
+    "prompts". Designing a prompt is essentially how you "program" a large language model model, usually by providing instructions or some examples of how
+    to successfully complete a task.
+  input:
+    uiOrder: 0
+    properties:
+      chat-history:
+        description: >-
+          Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be
+          ignored and will not have any effect when this field is populated. Each message should adhere to the format {"role": "The message role, i.e. ''system'',
+          ''user'' or ''assistant''", "content": "message content"}.
+        type: array
+        shortdescription: >-
+          Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be ignored and
+          will not have any effect when this field is populated. Each message should be an object adhere to the format: {"role": "The message role, i.e.
+          ''system'', ''user'' or ''assistant''", "content": "message content"}.
+        uiOrder: 4
+        items:
+          $ref: "#/$defs/chat-message"
+        title: Chat history
+      frequency-penalty:
+        default: 0
+        description: Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the
+          model's likelihood to repeat the same line verbatim.
+        maximum: 2
+        minimum: -2
+        nullable: true
+        type: number
+        shortDescription: Number between -2.0 and 2.0
+        uiOrder: 11
+        title: Frequency Penalty
+      images:
+        description: The images.
+        type: array
+        uiOrder: 3
+        items:
+          type: string
+        title: Image
+      max-tokens:
+        description: The maximum number of tokens that can be generated in the chat completion. The total length of input tokens and generated tokens is
+          limited by the model's context length.
+        nullable: true
+        type: integer
+        shortDescription: The maximum number of tokens to generate in the chat completion.
+        uiOrder: 7
+        title: Max Tokens
+      model:
+        description: ID of the model to use.
+        enum:
+          - o1
+          - o1-preview
+          - o1-mini
+          - gpt-4o-mini
+          - gpt-4o
+          - gpt-4o-2024-05-13
+          - gpt-4o-2024-08-06
+          - gpt-4-turbo
+          - gpt-4-turbo-2024-04-09
+          - gpt-4-0125-preview
+          - gpt-4-turbo-preview
+          - gpt-4-1106-preview
+          - gpt-4-vision-preview
+          - gpt-4
+          - gpt-4-0314
+          - gpt-4-0613
+          - gpt-4-32k
+          - gpt-4-32k-0314
+          - gpt-4-32k-0613
+          - gpt-3.5-turbo
+          - gpt-3.5-turbo-16k
+          - gpt-3.5-turbo-0301
+          - gpt-3.5-turbo-0613
+          - gpt-3.5-turbo-1106
+          - gpt-3.5-turbo-0125
+          - gpt-3.5-turbo-16k-0613
+        example: gpt-4o
+        type: string
+        shortDescription: ID of the model to use
+        uiOrder: 0
+        instillCredentialMap:
+          values:
+            - o1
+            - o1-preview
+            - o1-mini
+            - gpt-4o
+            - gpt-4o-2024-08-06
+            - gpt-4-turbo
+            - gpt-4-vision-preview
+            - gpt-4
+            - gpt-4-32k
+            - gpt-3.5-turbo
+            - gpt-4o-mini
+          targets:
+            - setup.api-key
+        title: Model
+      n:
+        default: 1
+        description: How many chat completion choices to generate for each input message. Note that you will be charged based on the number of generated
+          tokens across all of the choices. Keep `n` as `1` to minimize costs.
+        example: 1
+        maximum: 128
+        minimum: 1
+        nullable: true
+        type: integer
+        uiOrder: 6
+        title: N
+      presence-penalty:
+        default: 0
+        description: Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's
+          likelihood to talk about new topics.
+        maximum: 2
+        minimum: -2
+        nullable: true
+        type: number
+        shortDescription: Number between -2.0 and 2.0
+        uiOrder: 10
+        title: Presence Penalty
+      prompt:
+        description: The prompt text.
+        type: string
+        uiOrder: 1
+        title: Prompt
+      response-type:
+        description: Response format.
+        uiOrder: 8
+        additionalProperties: true
+        required:
+          - type
+        oneOf:
+          - properties:
+              type:
+                const: text
+                title: Type
+                description: Text.
+                uiOrder: 0
+                type: string
+            required:
+              - type
+            title: Text
+            type: object
+          - properties:
+              type:
+                const: json_object
+                title: Type
+                description: JSON Object.
+                uiOrder: 0
+                type: string
+            required:
+              - type
+            title: JSON Object
+            type: object
+          - properties:
+              type:
+                const: json_schema
+                title: Type
+                description: JSON Schema.
+                uiOrder: 0
+                type: string
+              json-schema:
+                description: Set up the schema of the structured output.
+                type: string
+                title: JSON Schema
+                shortDescription: Specify the schema of the structured output.
+                uiOrder: 1
+            required:
+              - type
+              - json-schema
+            title: JSON Schema
+            type: object
+        title: Response Format
+        type: object
+      system-message:
+        default: You are a helpful assistant.
+        description: The system message helps set the behavior of the assistant. For example, you can modify the personality of the assistant or provide
+          specific instructions about how it should behave throughout the conversation. By default, the model's behavior is using a generic message as "You
+          are a helpful assistant.".
+        type: string
+        shortDescription: The system message helps set the behavior of the assistant
+        uiOrder: 2
+        title: System Message
+      temperature:
+        default: 1
+        description: What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like
+          0.2 will make it more focused and deterministic. We generally recommend altering this or `top-p` but not both.
+        example: 1
+        maximum: 2
+        minimum: 0
+        nullable: true
+        type: number
+        shortDescription: What sampling temperature to use, between 0 and 2.
+        uiOrder: 5
+        title: Temperature
+      top-p:
+        default: 1
+        description: An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p
+          probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. We generally recommend altering this or
+          `temperature` but not both."
+        example: 1
+        maximum: 1
+        minimum: 0
+        nullable: true
+        type: number
+        shortDescription: An alternative to sampling with temperature, called nucleus sampling
+        uiOrder: 9
+        title: Top P
+      prediction:
+        description: Configuration for a Predicted Output, which can greatly improve response times when large parts of the model response are known ahead
+          of time. This is most common when you are regenerating a file with only minor changes to most of the content.
+        type: object
+        uiOrder: 12
+        title: Prediction
+        properties:
+          content:
+            description: The content that should be matched when generating a model response. If generated tokens would match this content, the entire model
+              response can be returned much more quickly.
+            type: string
+            uiOrder: 0
+            title: Content
+      tools:
+        description: A list of tools the model may call. Currently, only functions are supported as a tool. Use this to provide a list of functions the
+          model may generate JSON inputs for. A max of 128 functions are supported.
+        type: array
+        uiOrder: 13
+        title: Tools
+        items:
+          type: object
+          required:
+            - function
+          properties:
+            function:
+              uiOrder: 0
+              title: Function
+              type: object
+              description: The function to call.
+              required:
+                - name
+              properties:
+                description:
+                  type: string
+                  uiOrder: 0
+                  title: Description
+                  description: A description of what the function does, used by the model to choose when and how to call the function.
+                name:
+                  type: string
+                  uiOrder: 1
+                  title: Name
+                  description: The name of the function to be called. Must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length of
+                    64.
+                parameters:
+                  type: object
+                  uiOrder: 2
+                  title: Parameters
+                  description: The parameters the functions accepts, described as a JSON Schema object. Omitting parameters defines a function with an empty
+                    parameter list.
+                strict:
+                  type: boolean
+                  default: false
+                  uiOrder: 3
+                  title: Strict
+                  description: Whether to enable strict schema adherence when generating the function call. If set to true, the model will follow the exact
+                    schema defined in the parameters field.
+      tool-choice:
+        description: Controls which (if any) tool is called by the model. 'none' means the model will not call any tool and instead generates a message.
+          'auto' means the model can pick between generating a message or calling one or more tools. 'required' means the model must call one or more tools.
+        uiOrder: 14
+        title: Tool Choice
+        oneOf:
+          - type: string
+            enum: [none, auto, required]
+            uiOrder: 0
+            title: Tool Choice
+            description: none means the model will not call any tool and instead generates a message. auto means the model can pick between generating a
+              message or calling one or more tools. required means the model must call one or more tools.
+          - type: object
+            uiOrder: 0
+            title: Tool Choice
+            description: Specifies a tool the model should use. Use to force the model to call a specific function.
+            required:
+              - function
+            properties:
+              function:
+                uiOrder: 0
+                title: Function
+                description: The function to call.
+                type: object
+                required:
+                  - name
+                properties:
+                  name:
+                    type: string
+                    uiOrder: 0
+                    title: Name
+                    description: The name of the function to call.
+      reasoning-effort:
+        description: Constrains effort on reasoning for reasoning models. Currently supported values are minimal, low, medium, and high. Reducing reasoning
+          effort can result in faster responses and fewer tokens used on reasoning in a response.
+        uiOrder: 15
+        title: Reasoning Effort
+        type: string
+        enum:
+          - minimal
+          - low
+          - medium
+          - high
+        default: medium
+      verbosity:
+        description: Constrains the verbosity of the model's response. Lower values will result in more concise responses, while higher values will result
+          in more verbose responses. Currently supported values are low,
+        uiOrder: 16
+        title: Verbosity
+        type: string
+        enum:
+          - low
+          - medium
+          - high
+        default: medium
+    required:
+      - model
+      - prompt
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      texts:
+        uiOrder: 0
+        items:
+          title: Text
+          type: string
+        description: Texts.
+        title: Texts
+        type: array
+      tool-calls:
+        description: The tool calls generated by the model, such as function calls.
+        uiOrder: 1
+        items:
+          type: object
+          properties:
+            type:
+              type: string
+              uiOrder: 0
+              title: Type
+              description: The type of the tool. Currently, only function is supported.
+            function:
+              type: object
+              uiOrder: 1
+              title: Function
+              description: The function that the model called.
+              properties:
+                name:
+                  type: string
+                  uiOrder: 0
+                  title: Name
+                  description: The name of the function to call.
+                arguments:
+                  type: string
+                  uiOrder: 1
+                  title: Arguments
+                  description: The arguments to call the function with, as generated by the model in JSON format. Note that the model does not always generate
+                    valid JSON, and may hallucinate parameters not defined by your function schema. Validate the arguments in your code before calling your
+                    function.
+        title: Tool Calls
+        type: array
+      usage:
+        description: Usage statistics related to the query.
+        uiOrder: 1
+        properties:
+          total-tokens:
+            title: Total tokens
+            description: Total number of tokens used (prompt + completion).
+            uiOrder: 0
+            type: integer
+          completion-tokens:
+            title: Completion tokens
+            description: Total number of tokens used (completion).
+            uiOrder: 1
+            type: integer
+          prompt-tokens:
+            title: Prompt tokens
+            description: Total number of tokens used (prompt).
+            uiOrder: 2
+            type: integer
+          prompt-token-details:
+            title: Prompt token details
+            description: Breakdown of tokens used in the prompt.
+            uiOrder: 3
+            type: object
+            properties:
+              audio-tokens:
+                title: Audio tokens
+                description: Audio input tokens present in the prompt.
+                uiOrder: 0
+                type: integer
+              cached-tokens:
+                title: Cached tokens
+                description: Cached tokens present in the prompt.
+                uiOrder: 1
+                type: integer
+          completion-token-details:
+            title: Completion token details
+            description: Breakdown of tokens used in a completion.
+            uiOrder: 4
+            type: object
+            properties:
+              reasoning-tokens:
+                title: Reasoning tokens
+                description: Tokens generated by the model for reasoning.
+                uiOrder: 0
+                type: integer
+              audio-tokens:
+                title: Audio tokens
+                description: Audio input tokens generated by the model.
+                uiOrder: 1
+                type: integer
+              accepted-prediction-tokens:
+                title: Accepted prediction tokens
+                description: When using Predicted Outputs, the number of tokens in the prediction that appeared in the completion.
+                uiOrder: 2
+                type: integer
+              rejected-prediction-tokens:
+                title: Rejected prediction tokens
+                description: When using Predicted Outputs, the number of tokens in the prediction that did not appear in the completion. However, like reasoning
+                  tokens, these tokens are still counted in the total completion tokens for purposes of billing, output, and context window limits.
+                uiOrder: 3
+                type: integer
+        required:
+          - total-tokens
+        title: Usage
+        type: object
+    required:
+      - texts
+    title: Output
+    type: object
+TASK_TEXT_TO_IMAGE:
+  shortDescription: Generate or manipulate images with DALL·E.
+  input:
+    uiOrder: 0
+    properties:
+      model:
+        default: dall-e-2
+        description: The model to use for image generation.
+        enum:
+          - dall-e-2
+          - dall-e-3
+        example: dall-e-3
+        nullable: true
+        instillCredentialMap:
+          values:
+            - dall-e-3
+          targets:
+            - setup.api-key
+        type: string
+        shortDescription: ID of the model to use
+        uiOrder: 0
+        title: Model
+      n:
+        default: 1
+        description: The number of images to generate. Must be between 1 and 10. For `dall-e-3`, only `n=1` is supported.
+        example: 1
+        maximum: 10
+        minimum: 1
+        nullable: true
+        type: integer
+        uiOrder: 2
+        title: N
+      prompt:
+        description: A text description of the desired image(s). The maximum length is 1000 characters for `dall-e-2` and 4000 characters for `dall-e-3`.
+        example: A cute baby sea otter
+        type: string
+        shortDescription: A text description of the desired image(s).
+        uiOrder: 1
+        title: Prompt
+      quality:
+        default: standard
+        description: The quality of the image that will be generated. `hd` creates images with finer details and greater consistency across the image. This
+          param is only supported for `dall-e-3`.
+        enum:
+          - standard
+          - hd
+        example: standard
+        type: string
+        shortDescription: The quality of the image that will be generated.
+        uiOrder: 3
+        title: Quality
+      size:
+        default: 1024x1024
+        description: The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024` for `dall-e-2`. Must be one of `1024x1024`, `1792x1024`,
+          or `1024x1792` for `dall-e-3` models.
+        enum:
+          - 256x256
+          - 512x512
+          - 1024x1024
+          - 1792x1024
+          - 1024x1792
+        example: 1024x1024
+        nullable: true
+        type: string
+        shortDescription: The size of the generated images.
+        uiOrder: 4
+        title: Size
+      style:
+        default: vivid
+        description: The style of the generated images. Must be one of `vivid` or `natural`. Vivid causes the model to lean towards generating hyper-real
+          and dramatic images. Natural causes the model to produce more natural, less hyper-real looking images. This param is only supported for `dall-e-3`.
+        enum:
+          - vivid
+          - natural
+        example: vivid
+        nullable: true
+        type: string
+        shortDescription: The style of the generated images.
+        uiOrder: 5
+        title: N
+    required:
+      - prompt
+      - model
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      results:
+        description: Generated results.
+        uiOrder: 0
+        items:
+          description: Generated result.
+          properties:
+            image:
+              title: Generated Image
+              description: Generated image.
+              uiOrder: 0
+              type: image/webp
+            revised-prompt:
+              title: Revised Prompt
+              description: Revised prompt.
+              uiOrder: 1
+              type: string
+          required:
+            - image
+            - revised-prompt
+          title: Image
+          type: object
+        title: Images
+        type: array
+    required:
+      - results
+    title: Output
+    type: object
+TASK_TEXT_TO_SPEECH:
+  shortDescription: Turn text into lifelike spoken audio
+  input:
+    uiOrder: 0
+    properties:
+      model:
+        description: >-
+          One of the available TTS models: `tts-1` or `tts-1-hd`.
+        default: tts-1
+        enum:
+          - tts-1
+          - tts-1-hd
+        type: string
+        instillCredentialMap:
+          values:
+            - tts-1
+            - tts-1-hd
+          targets:
+            - setup.api-key
+        shortDescription: ID of the model to use
+        uiOrder: 0
+        title: Model
+      response-type:
+        default: mp3
+        description: >-
+          The format to audio in. Supported formats are `mp3`, `opus`, `aac`, and `flac`.
+        enum:
+          - mp3
+          - opus
+          - aac
+          - flac
+        type: string
+        shortDescription: The format to audio
+        uiOrder: 3
+        title: Response Format
+      speed:
+        default: 1
+        description: >-
+          The speed of the generated audio. Select a value from `0.25` to `4.0`. `1.0` is the default.
+        maximum: 4
+        minimum: 0.25
+        type: number
+        shortDescription: The speed of the generated audio
+        uiOrder: 4
+        title: Speed
+      text:
+        description: >-
+          The text to generate audio for. The maximum length is 4096 characters.
+        maxLength: 4096
+        type: string
+        shortDescription: The text to generate audio for
+        uiOrder: 1
+        title: Text
+      voice:
+        description: >-
+          The voice to use when generating the audio. Supported voices are `alloy`, `echo`, `fable`, `onyx`, `nova`, and `shimmer`.
+        enum:
+          - alloy
+          - echo
+          - fable
+          - onyx
+          - nova
+          - shimmer
+        type: string
+        default: alloy
+        shortDescription: The voice to use when generating the audio
+        uiOrder: 2
+        title: Voice
+    required:
+      - text
+      - model
+      - voice
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      audio:
+        description: >-
+          AI generated audio.
+        uiOrder: 0
+        title: Audio
+        type: audio/wav
+    required: []
+    title: Output
+    type: object

@@ -6,18 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	"go.opentelemetry.io/otel"
-
 	"github.com/instill-ai/pipeline-backend/pkg/service"
 
-	errdomain "github.com/instill-ai/pipeline-backend/pkg/errors"
 	healthcheckpb "github.com/instill-ai/protogen-go/common/healthcheck/v1beta"
-	pipelinepb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 // TODO: in the public_handler, we should convert all id to uuid when calling service
-
-var tracer = otel.Tracer("pipeline-backend.public-handler.tracer")
 
 // PublicHandler handles public API
 type PublicHandler struct {
@@ -38,7 +34,7 @@ type TriggerPipelineReleaseRequestInterface interface {
 }
 
 // NewPublicHandler initiates a handler instance
-func NewPublicHandler(ctx context.Context, s service.Service) pipelinepb.PipelinePublicServiceServer {
+func NewPublicHandler(s service.Service) *PublicHandler {
 	return &PublicHandler{
 		service: s,
 	}
@@ -85,7 +81,7 @@ type PrivateHandler struct {
 }
 
 // NewPrivateHandler initiates a handler instance
-func NewPrivateHandler(ctx context.Context, s service.Service) pipelinepb.PipelinePrivateServiceServer {
+func NewPrivateHandler(s service.Service) *PrivateHandler {
 	return &PrivateHandler{
 		service: s,
 	}
@@ -101,10 +97,11 @@ func (h *PrivateHandler) SetService(s service.Service) {
 	h.service = s
 }
 
+// CheckName checks if a name is available.
 func (h *PublicHandler) CheckName(ctx context.Context, req *pipelinepb.CheckNameRequest) (resp *pipelinepb.CheckNameResponse, err error) {
 	name := req.GetName()
 
-	ns, err := h.service.GetRscNamespace(ctx, name)
+	ns, err := h.service.GetNamespaceByID(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +112,7 @@ func (h *PublicHandler) CheckName(ctx context.Context, req *pipelinepb.CheckName
 
 	if rscType == "pipelines" {
 		_, err := h.service.GetNamespacePipelineByID(ctx, ns, name, pipelinepb.Pipeline_VIEW_BASIC)
-		if err != nil && errors.Is(err, errdomain.ErrNotFound) {
+		if err != nil && errors.Is(err, errorsx.ErrNotFound) {
 			return &pipelinepb.CheckNameResponse{
 				Availability: pipelinepb.CheckNameResponse_NAME_AVAILABLE,
 			}, nil

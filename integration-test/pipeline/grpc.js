@@ -9,11 +9,11 @@ import * as pipelinePrivate from "./grpc-pipeline-private.js";
 import * as trigger from "./grpc-trigger.js";
 import * as triggerAsync from "./grpc-trigger-async.js";
 
-const client = new grpc.Client();
+const pipelineClient = new grpc.Client();
 const mgmtClient = new grpc.Client();
 
-client.load(["../proto/vdp/pipeline/v1beta"], "pipeline_public_service.proto");
-client.load(["../proto/core/mgmt/v1beta"], "mgmt_public_service.proto");
+pipelineClient.load(["../proto/pipeline/pipeline/v1beta"], "pipeline_public_service.proto");
+mgmtClient.load(["../proto/core/mgmt/v1beta"], "mgmt_public_service.proto");
 
 import * as constant from "./const.js";
 
@@ -26,7 +26,7 @@ export let options = {
 };
 
 export function setup() {
-  client.connect(constant.pipelineGRPCPublicHost, {
+  pipelineClient.connect(constant.pipelineGRPCPublicHost, {
     plaintext: true,
     timeout: "300s",
   });
@@ -53,14 +53,14 @@ export function setup() {
     "timeout": "600s",
   }
 
-  var resp = client.invoke(
+  var authResp = mgmtClient.invoke(
     "core.mgmt.v1beta.MgmtPublicService/GetAuthenticatedUser",
     {},
     metadata
   );
-  client.close();
+  pipelineClient.close();
   mgmtClient.close();
-  return {metadata: metadata, expectedOwner: resp.message.user};
+  return { metadata: metadata, expectedOwner: authResp.message.user };
 }
 
 export default function (data) {
@@ -71,12 +71,12 @@ export default function (data) {
   // Health check
   {
     group("Pipelines API: Health check", () => {
-      client.connect(constant.pipelineGRPCPublicHost, {
+      pipelineClient.connect(constant.pipelineGRPCPublicHost, {
         plaintext: true,
       });
       check(
-        client.invoke(
-          "vdp.pipeline.v1beta.PipelinePublicService/Liveness",
+        pipelineClient.invoke(
+          "pipeline.pipeline.v1beta.PipelinePublicService/Liveness",
           {}
         ),
         {
@@ -84,7 +84,7 @@ export default function (data) {
             r.status === grpc.StatusOK,
         }
       );
-      client.close();
+      pipelineClient.close();
     });
   }
 
@@ -113,12 +113,12 @@ export default function (data) {
 
 export function teardown(data) {
   group("Pipeline API: Delete all pipelines created by this test", () => {
-    client.connect(constant.pipelineGRPCPublicHost, {
+    pipelineClient.connect(constant.pipelineGRPCPublicHost, {
       plaintext: true,
     });
 
-    for (const pipeline of client.invoke(
-      "vdp.pipeline.v1beta.PipelinePublicService/ListUserPipelines",
+    for (const pipeline of pipelineClient.invoke(
+      "pipeline.pipeline.v1beta.PipelinePublicService/ListUserPipelines",
       {
         parent: `${constant.namespace}`,
         pageSize: 1000,
@@ -126,26 +126,26 @@ export function teardown(data) {
       data.metadata
     ).message.pipelines) {
       check(
-        client.invoke(
-          `vdp.pipeline.v1beta.PipelinePublicService/DeleteUserPipeline`,
+        pipelineClient.invoke(
+          `pipeline.pipeline.v1beta.PipelinePublicService/DeleteUserPipeline`,
           {
             name: `${constant.namespace}/pipelines/${pipeline.id}`,
           },
           data.metadata
         ),
         {
-          [`vdp.pipeline.v1beta.PipelinePublicService/DeleteUserPipeline response StatusOK`]:
+          [`pipeline.pipeline.v1beta.PipelinePublicService/DeleteUserPipeline response StatusOK`]:
             (r) => r.status === grpc.StatusOK,
         }
       );
     }
 
-    client.close();
+    pipelineClient.close();
   });
 
-  client.connect(constant.pipelineGRPCPublicHost, {
-    plaintext: true,
+  group("Integration API: Delete data created by this test", () => {
+    var q = `DELETE FROM pipeline WHERE id LIKE '${constant.dbIDPrefix}%';`;
+    constant.db.exec(q);
+    constant.db.close();
   });
-
-  client.close();
 }

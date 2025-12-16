@@ -4,22 +4,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
+	"go.uber.org/zap"
 )
 
-type ConvertDocumentToImagesTransformerInput struct {
-	Document string `json:"document"`
-	Filename string `json:"filename"`
+// ConvertDocumentToImagesInput ...
+type ConvertDocumentToImagesInput struct {
+	Document   string `json:"document"`
+	Filename   string `json:"filename"`
+	Resolution int    `json:"resolution"`
 }
 
-type ConvertDocumentToImagesTransformerOutput struct {
+// ConvertDocumentToImagesOutput ...
+type ConvertDocumentToImagesOutput struct {
 	Images    []string `json:"images"`
 	Filenames []string `json:"filenames"`
 }
 
-func ConvertDocumentToImage(inputStruct *ConvertDocumentToImagesTransformerInput) (*ConvertDocumentToImagesTransformerOutput, error) {
+type pageNumbers struct {
+	PageNumbers int    `json:"page_numbers"`
+	Error       string `json:"error"`
+}
 
+type pageImage struct {
+	Image    string `json:"image"`
+	Filename string `json:"filename"`
+}
+
+// DocumentToImageConverter transforms documents to images.
+type DocumentToImageConverter struct {
+	logger *zap.Logger
+}
+
+// NewDocumentToImageConverter initializes a DocumentToImageConverter.
+func NewDocumentToImageConverter(l *zap.Logger) *DocumentToImageConverter {
+	if l == nil {
+		l = zap.NewNop()
+	}
+
+	return &DocumentToImageConverter{logger: l}
+}
+
+// Convert transforms a document to images.
+func (c *DocumentToImageConverter) Convert(inputStruct *ConvertDocumentToImagesInput) (*ConvertDocumentToImagesOutput, error) {
 	contentType, err := util.GetContentTypeFromBase64(inputStruct.Document)
 	if err != nil {
 		return nil, err
@@ -43,8 +72,12 @@ func ConvertDocumentToImage(inputStruct *ConvertDocumentToImagesTransformerInput
 	}
 
 	var base64PDFWithoutMime string
-	if RequiredToRepair(base64PDF) {
-		base64PDFWithoutMime, err = RepairPDF(base64PDF)
+	shouldRepair, err := requiresRepair(base64PDF)
+	if err != nil { // Non-blocking error
+		c.logger.Error("Failed to check PDF state", zap.Error(err))
+	}
+	if shouldRepair {
+		base64PDFWithoutMime, err = repairPDF(base64PDF, c.logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to repair PDF: %w", err)
 		}
@@ -52,26 +85,79 @@ func ConvertDocumentToImage(inputStruct *ConvertDocumentToImagesTransformerInput
 		base64PDFWithoutMime = util.TrimBase64Mime(base64PDF)
 	}
 
-	paramsJSON := map[string]interface{}{
-		"PDF":      base64PDFWithoutMime,
-		"filename": inputStruct.Filename,
+	getNumberJSON := map[string]interface{}{
+		"PDF": base64PDFWithoutMime,
 	}
 
-	pythonCode := imageProcessor + pdfTransformer + taskConvertToImagesExecution
-
-	outputBytes, err := util.ExecutePythonCode(pythonCode, paramsJSON)
-
+	pageNumbersBytes, err := util.ExecutePythonCode(getPageNumbersExecution, getNumberJSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run python script: %w", err)
+		return nil, fmt.Errorf("get page numbers: %w", err)
 	}
 
-	output := ConvertDocumentToImagesTransformerOutput{}
-
-	err = json.Unmarshal(outputBytes, &output)
-
+	var pageNumbers pageNumbers
+	err = json.Unmarshal(pageNumbersBytes, &pageNumbers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal output: %w", err)
+		return nil, fmt.Errorf("unmarshalling page numbers (%s): %w", string(pageNumbersBytes), err)
 	}
+
+	if pageNumbers.Error != "" {
+		return nil, fmt.Errorf("page numbers contains error: %s", pageNumbers.Error)
+	}
+
+	if pageNumbers.PageNumbers == 0 {
+		return &ConvertDocumentToImagesOutput{
+			Images:    []string{},
+			Filenames: []string{},
+		}, nil
+	}
+
+	pythonCode := pageImageProcessor + pdfTransformer + imageConverter
+
+	// We will make this number tunable & configurable in the future.
+	maxWorkers := 5
+
+	jobs := make(chan int, pageNumbers.PageNumbers)
+	output := ConvertDocumentToImagesOutput{
+		Images:    make([]string, pageNumbers.PageNumbers),
+		Filenames: make([]string, pageNumbers.PageNumbers),
+	}
+
+	// Create workers
+	wg := sync.WaitGroup{}
+	for w := 0; w < maxWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pageIdx := range jobs {
+				paramsJSON := map[string]interface{}{
+					"PDF":        base64PDFWithoutMime,
+					"filename":   inputStruct.Filename,
+					"resolution": inputStruct.Resolution,
+					"page_idx":   pageIdx,
+				}
+				outputBytes, err := util.ExecutePythonCode(pythonCode, paramsJSON)
+				if err != nil {
+					continue
+				}
+				var pageImage pageImage
+				err = json.Unmarshal(outputBytes, &pageImage)
+				if err != nil {
+					continue
+				}
+				output.Images[pageIdx] = pageImage.Image
+				output.Filenames[pageIdx] = pageImage.Filename
+			}
+		}()
+	}
+
+	// Send jobs to workers
+	for i := 0; i < pageNumbers.PageNumbers; i++ {
+		jobs <- i
+	}
+	close(jobs)
+
+	// Wait for all workers to complete
+	wg.Wait()
 
 	if len(output.Filenames) == 0 {
 		output.Filenames = []string{}

@@ -4,84 +4,211 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/extrame/xls"
 	"github.com/xuri/excelize/v2"
+	"go.uber.org/zap"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
 )
 
-type MarkdownTransformerGetterFunc func(fileExtension string, inputStruct *ConvertDocumentToMarkdownTransformerInput) (MarkdownTransformer, error)
-type MarkdownTransformer interface {
-	Transform() (converterOutput, error)
+var (
+	// libreOfficeMutex ensures only one LibreOffice process runs at a time
+	// This prevents race conditions and permission issues when multiple processes
+	// try to initialize LibreOffice user profiles simultaneously
+	libreOfficeMutex sync.Mutex
+)
+
+type converterOutput struct {
+	Body          string   `json:"body"`
+	Images        []string `json:"images"`
+	AllPageImages []string `json:"all_page_images"`
+	AllPage       bool     `json:"display_all_page_image"`
+	Markdowns     []string `json:"markdowns"`
+
+	Logs         []string `json:"logs"`
+	ParsingError []string `json:"parsing_error"`
+	SystemError  string   `json:"system_error"`
 }
 
-type PDFToMarkdownTransformer struct {
-	Base64EncodedText   string
-	FileExtension       string
-	DisplayImageTag     bool
-	DisplayAllPageImage bool
-	PDFConvertFunc      func(string, bool, bool) (converterOutput, error)
+type markdownTransformer interface {
+	transform() (converterOutput, error)
 }
 
-func (t PDFToMarkdownTransformer) Transform() (converterOutput, error) {
-	return t.PDFConvertFunc(t.Base64EncodedText, t.DisplayImageTag, t.DisplayAllPageImage)
+type pdfToMarkdownInputStruct struct {
+	base64Text          string
+	displayImageTag     bool
+	displayAllPageImage bool
+	resolution          int
 }
 
-type DocxDocToMarkdownTransformer struct {
-	Base64EncodedText   string
-	FileExtension       string
-	DisplayImageTag     bool
-	DisplayAllPageImage bool
-	PDFConvertFunc      func(string, bool, bool) (converterOutput, error)
+type pdfToMarkdownTransformer struct {
+	fileExtension       string
+	engine              string
+	pdfToMarkdownStruct pdfToMarkdownInputStruct
+	logger              *zap.Logger
 }
 
-func (t DocxDocToMarkdownTransformer) Transform() (converterOutput, error) {
+func (t *pdfToMarkdownTransformer) transform() (converterOutput, error) {
+	var output converterOutput
 
-	base64PDF, err := ConvertToPDF(t.Base64EncodedText, t.FileExtension)
+	t0 := time.Now()
+	ok := false
+	benchmarkLog := t.logger.With(zap.Time("start", t0))
+	defer func() {
+		benchmarkLog.Info("PDF to Markdown conversion",
+			zap.Float64("durationInSecs", time.Since(t0).Seconds()),
+			zap.Bool("ok", ok),
+		)
+	}()
 
-	if err != nil {
-		return converterOutput{}, fmt.Errorf("failed to encode file to base64: %w", err)
+	pdfBase64 := util.TrimBase64Mime(t.pdfToMarkdownStruct.base64Text)
+	shouldRepair, err := requiresRepair(t.pdfToMarkdownStruct.base64Text)
+	if err != nil { // Non-blocking error
+		t.logger.Error("Failed to check PDF state", zap.Error(err))
 	}
 
-	return t.PDFConvertFunc(base64PDF, t.DisplayImageTag, t.DisplayAllPageImage)
-}
+	if shouldRepair {
+		repairedPDF, err := repairPDF(pdfBase64, t.logger)
+		if err != nil {
+			return output, fmt.Errorf("repairing PDF: %w", err)
+		}
 
-type PptPptxToMarkdownTransformer struct {
-	Base64EncodedText   string
-	FileExtension       string
-	DisplayImageTag     bool
-	DisplayAllPageImage bool
-	PDFConvertFunc      func(string, bool, bool) (converterOutput, error)
-}
+		pdfBase64 = repairedPDF
+	}
+	benchmarkLog = benchmarkLog.With(zap.Time("repair", time.Now()))
 
-func (t PptPptxToMarkdownTransformer) Transform() (converterOutput, error) {
-
-	base64PDF, err := ConvertToPDF(t.Base64EncodedText, t.FileExtension)
-
-	if err != nil {
-		return converterOutput{}, fmt.Errorf("failed to encode file to base64: %w", err)
+	params := map[string]interface{}{
+		"PDF":                    pdfBase64,
+		"display-image-tag":      t.pdfToMarkdownStruct.displayImageTag,
+		"display-all-page-image": t.pdfToMarkdownStruct.displayAllPageImage,
+		"resolution":             t.pdfToMarkdownStruct.resolution,
 	}
 
-	return t.PDFConvertFunc(base64PDF, t.DisplayImageTag, t.DisplayAllPageImage)
+	var pythonCode string
+	switch t.engine {
+	case "docling":
+		pythonCode = doclingPDFToMDConverter
+	default:
+		pythonCode = pageImageProcessor + pdfTransformer + pdfPlumberPDFToMDConverter
+	}
+
+	outputBytes, err := util.ExecutePythonCode(pythonCode, params)
+
+	benchmarkLog = benchmarkLog.With(zap.Time("convert", time.Now()))
+	if err != nil {
+		return output, fmt.Errorf("running Python script: %w", err)
+	}
+
+	err = json.Unmarshal(outputBytes, &output)
+	if err != nil {
+		return output, fmt.Errorf("unmarshalling output: %w", err)
+	}
+
+	if output.SystemError != "" {
+		// There are documents that will fail to be converted to MD. Usually,
+		// the document-to-markdwon task is a step in a pipeline to obtain an
+		// approximate result or to feed it into other components that will
+		// refine it. In most cases, we don't want this failure to stop the
+		// execution of the pipeline, so we continue with a blank result.
+		//
+		// TODO jvallesm: INS-8156 implements a failover mechanism so pipeline
+		// recipes can determine if a component failure is fatal or not. When
+		// that's implemented, we should return an error here instead of
+		// continuing.
+		t.logger.Error("Failed to convert PDF to Markdown. Continuing with empty result.", zap.String("systemError", output.SystemError))
+	}
+
+	if len(output.Logs) > 0 {
+		t.logger.Info("PDF to Markdown Python script produced conversion logs",
+			zap.Strings("conversionLogs", output.Logs),
+		)
+	}
+
+	benchmarkLog = benchmarkLog.With(zap.Time("handleOutput", time.Now()))
+	ok = true
+
+	return output, nil
 }
 
-type HTMLToMarkdownTransformer struct {
-	Base64EncodedText string
-	FileExtension     string
-	DisplayImageTag   bool
+// docToMarkdownTransformer is a transformer for DOC and DOCX files. It converts
+// the file to PDF and then to Markdown.
+type docToMarkdownTransformer struct {
+	*pdfToMarkdownTransformer
+	base64EncodedText string
 }
 
-func (t HTMLToMarkdownTransformer) Transform() (converterOutput, error) {
+func (t *docToMarkdownTransformer) transform() (converterOutput, error) {
+	if err := t.validate(); err != nil {
+		return converterOutput{}, fmt.Errorf("validate input: %w", err)
+	}
 
-	data, err := base64.StdEncoding.DecodeString(util.TrimBase64Mime(t.Base64EncodedText))
+	base64PDF, err := ConvertToPDF(t.base64EncodedText, t.fileExtension)
+
+	if err != nil {
+		return converterOutput{}, fmt.Errorf("convert file to PDF: %w", err)
+	}
+
+	t.pdfToMarkdownStruct.base64Text = base64PDF
+
+	return t.pdfToMarkdownTransformer.transform()
+}
+
+func (t docToMarkdownTransformer) validate() error {
+	if t.pdfToMarkdownStruct.base64Text != "" {
+		return fmt.Errorf("PDF struct base64 text should be empty before transformation")
+	}
+	return nil
+}
+
+// pptToMarkdownTransformer is a transformer for PPT and PPTX files. It converts
+// the file to PDF and then to markdown.
+type pptToMarkdownTransformer struct {
+	*pdfToMarkdownTransformer
+	base64EncodedText string
+}
+
+func (t *pptToMarkdownTransformer) transform() (converterOutput, error) {
+
+	if err := t.validate(); err != nil {
+		return converterOutput{}, fmt.Errorf("validate input: %w", err)
+	}
+
+	base64PDF, err := ConvertToPDF(t.base64EncodedText, t.fileExtension)
+
+	if err != nil {
+		return converterOutput{}, fmt.Errorf("convert file to PDF: %w", err)
+	}
+
+	t.pdfToMarkdownStruct.base64Text = base64PDF
+
+	return t.pdfToMarkdownTransformer.transform()
+}
+
+func (t pptToMarkdownTransformer) validate() error {
+	if t.pdfToMarkdownStruct.base64Text != "" {
+		return fmt.Errorf("PDF struct base64 text should be empty before transformation")
+	}
+	return nil
+}
+
+type htmlToMarkdownTransformer struct {
+	base64EncodedText string
+}
+
+func (t *htmlToMarkdownTransformer) transform() (converterOutput, error) {
+
+	data, err := base64.StdEncoding.DecodeString(util.TrimBase64Mime(t.base64EncodedText))
 	if err != nil {
 		return converterOutput{}, fmt.Errorf("failed to decode base64 to file: %w", err)
 	}
@@ -97,13 +224,12 @@ func (t HTMLToMarkdownTransformer) Transform() (converterOutput, error) {
 	return converterOutput{Body: markdown}, nil
 }
 
-type XlsxToMarkdownTransformer struct {
-	Base64EncodedText string
+type xlsxToMarkdownTransformer struct {
+	base64EncodedText string
 }
 
-func (t XlsxToMarkdownTransformer) Transform() (converterOutput, error) {
-
-	base64String := strings.Split(t.Base64EncodedText, ",")[1]
+func (t *xlsxToMarkdownTransformer) transform() (converterOutput, error) {
+	base64String := strings.Split(t.base64EncodedText, ",")[1]
 	fileContent, err := base64.StdEncoding.DecodeString(base64String)
 
 	if err != nil {
@@ -142,13 +268,12 @@ func (t XlsxToMarkdownTransformer) Transform() (converterOutput, error) {
 	return converterOutput{Body: result}, nil
 }
 
-type XlsToMarkdownTransformer struct {
-	Base64EncodedText string
+type xlsToMarkdownTransformer struct {
+	base64EncodedText string
 }
 
-func (t XlsToMarkdownTransformer) Transform() (converterOutput, error) {
-
-	base64String := strings.Split(t.Base64EncodedText, ",")[1]
+func (t *xlsToMarkdownTransformer) transform() (converterOutput, error) {
+	base64String := strings.Split(t.base64EncodedText, ",")[1]
 	fileContent, err := base64.StdEncoding.DecodeString(base64String)
 
 	output := converterOutput{}
@@ -196,13 +321,12 @@ func (t XlsToMarkdownTransformer) Transform() (converterOutput, error) {
 
 }
 
-type CSVToMarkdownTransformer struct {
-	Base64EncodedText string
+type csvToMarkdownTransformer struct {
+	base64EncodedText string
 }
 
-func (t CSVToMarkdownTransformer) Transform() (converterOutput, error) {
-
-	base64String := strings.Split(t.Base64EncodedText, ",")[1]
+func (t *csvToMarkdownTransformer) transform() (converterOutput, error) {
+	base64String := strings.Split(t.base64EncodedText, ",")[1]
 	fileContent, err := base64.StdEncoding.DecodeString(base64String)
 
 	if err != nil {
@@ -239,44 +363,85 @@ func encodeFileToBase64(inputPath string) (string, error) {
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
+// ConvertToPDF converts a base64 encoded document to a PDF using LibreOffice or wkhtmltopdf.
+// It uses a mutex to ensure only one conversion process runs at a time, preventing
+// race conditions and permission issues.
 func ConvertToPDF(base64Encoded, fileExtension string) (string, error) {
-	tempPpt, err := os.CreateTemp("", "temp_document.*."+fileExtension)
+	// Serialize operations to prevent race conditions
+	libreOfficeMutex.Lock()
+	defer libreOfficeMutex.Unlock()
+
+	tempFile, err := os.CreateTemp("", "temp_document.*."+fileExtension)
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary document: %w", err)
 	}
-	inputFileName := tempPpt.Name()
+	inputFileName := tempFile.Name()
 	defer os.Remove(inputFileName)
 
-	err = writeDecodeToFile(base64Encoded, tempPpt)
+	err = writeDecodeToFile(base64Encoded, tempFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64 to file: %w", err)
 	}
 
-	tempDir, err := os.MkdirTemp("", "libreoffice")
+	tempDir, err := os.MkdirTemp("", "conversion")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temporary directory: %s", err.Error())
+		return "", fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	cmd := exec.Command("libreoffice", "--headless", "--convert-to", "pdf", inputFileName)
-	cmd.Env = append(os.Environ(), "HOME="+tempDir)
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to execute LibreOffice command: %s", err.Error())
+	// Set proper permissions for the temporary directory
+	if err := os.Chmod(tempDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to set permissions on temporary directory: %w", err)
 	}
 
-	// LibreOffice is not executed in temp directory like inputFileName.
-	// The generated PDF is not in temp directory.
-	// So, we need to remove the path and keep only the file name.
-	noPathFileName := filepath.Base(inputFileName)
-	tempPDFName := strings.TrimSuffix(noPathFileName, filepath.Ext(inputFileName)) + ".pdf"
-	defer os.Remove(tempPDFName)
+	var cmd *exec.Cmd
+	var outputFileName string
 
-	base64PDF, err := encodeFileToBase64(tempPDFName)
+	// Use wkhtmltopdf for HTML files if available, otherwise use LibreOffice
+	if fileExtension == "html" {
+		// Try wkhtmltopdf first for HTML files (better HTML rendering)
+		outputFileName = filepath.Join(tempDir, strings.TrimSuffix(filepath.Base(inputFileName), ".html")+".pdf")
 
+		// Check if wkhtmltopdf is available
+		if _, err := exec.LookPath("wkhtmltopdf"); err == nil {
+			// wkhtmltopdf is available, use it
+			cmd = exec.Command("wkhtmltopdf", inputFileName, outputFileName)
+		} else {
+			// wkhtmltopdf not available, use LibreOffice for HTML with specific HTML import filter
+			cmd = exec.Command("libreoffice", "--headless", "--infilter=HTML", "--convert-to", "pdf", "--outdir", tempDir, inputFileName)
+			cmd.Env = append(os.Environ(), "HOME="+tempDir)
+			outputFileName = filepath.Join(tempDir, strings.TrimSuffix(filepath.Base(inputFileName), ".html")+".pdf")
+		}
+	} else {
+		// Use LibreOffice for all other document types
+		cmd = exec.Command("libreoffice", "--headless", "--convert-to", "pdf", "--outdir", tempDir, inputFileName)
+		cmd.Env = append(os.Environ(), "HOME="+tempDir)
+		outputFileName = filepath.Join(tempDir, strings.TrimSuffix(filepath.Base(inputFileName), "."+fileExtension)+".pdf")
+	}
+
+	// Capture both stdout and stderr for better error reporting
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// In the different containers, we have the different versions of LibreOffice, which means the behavior of LibreOffice may be different.
-		// So, we need to handle the case when the generated PDF is not in the temp directory.
+		return "", fmt.Errorf("failed to execute conversion command: %s (output: %s)", err.Error(), string(output))
+	}
+
+	// Check if the output file exists
+	if _, err := os.Stat(outputFileName); os.IsNotExist(err) {
+		// For LibreOffice fallback, try the standard LibreOffice output location
+		noPathFileName := filepath.Base(inputFileName)
+		standardPDFName := filepath.Join(tempDir, strings.TrimSuffix(noPathFileName, filepath.Ext(inputFileName))+".pdf")
+		if _, err := os.Stat(standardPDFName); err == nil {
+			outputFileName = standardPDFName
+		} else {
+			return "", fmt.Errorf("output PDF file not found at expected location: %s", outputFileName)
+		}
+	}
+
+	defer os.Remove(outputFileName)
+
+	base64PDF, err := encodeFileToBase64(outputFileName)
+	if err != nil {
+		// Handle the case when the input is already a PDF
 		if fileExtension == "pdf" {
 			base64PDF, err := encodeFileToBase64(inputFileName)
 			if err != nil {
@@ -284,6 +449,8 @@ func ConvertToPDF(base64Encoded, fileExtension string) (string, error) {
 			}
 			return base64PDF, nil
 		}
+		return "", fmt.Errorf("failed to encode PDF file to base64: %w", err)
 	}
+
 	return base64PDF, nil
 }

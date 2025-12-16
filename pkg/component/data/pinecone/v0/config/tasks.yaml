@@ -1,0 +1,282 @@
+TASK_QUERY:
+  shortDescription: Retrieve the ids of the most similar items in a namespace, along with their similarity scores.
+  input:
+    uiOrder: 0
+    properties:
+      id:
+        description: The unique ID of the vector to be used as a query vector. If present, the vector parameter will be ignored.
+        type: string
+        shortDescription: Query by vector ID instead of by vector
+        uiOrder: 0
+        title: ID
+      vector:
+        description: An array of dimensions for the query vector.
+        type: array
+        uiOrder: 1
+        items:
+          description: A dimension of the vector.
+          example: 0.8167237
+          type: number
+        minItems: 1
+        title: Vector
+      top-k:
+        description: The number of results to return for each query.
+        type: integer
+        uiOrder: 2
+        title: Top K
+      namespace:
+        description: The namespace to query.
+        type: string
+        uiOrder: 3
+        title: Namespace
+      filter:
+        description: The filter to apply. You can use vector metadata to limit your search. See more details <a href="https://www.pinecone.io/docs/metadata-filtering/">here</a>.
+        type: object
+        shortDescription: The filter to apply on vector metadata
+        uiOrder: 4
+        order: 1
+        required: []
+        title: Filter
+      min-score:
+        description: Exclude results whose score is below this value.
+        type: number
+        uiOrder: 5
+        title: Minimum Score
+      include-metadata:
+        default: false
+        description: Indicates whether metadata is included in the response as well as the IDs.
+        type: boolean
+        uiOrder: 6
+        title: Include Metadata
+      include-values:
+        default: false
+        description: Indicates whether vector values are included in the response.
+        type: boolean
+        uiOrder: 7
+        title: Include Values
+    required:
+      - top-k
+      - vector
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      matches:
+        description: The matches returned for the query.
+        uiOrder: 1
+        items:
+          properties:
+            id:
+              description: The ID of the matched vector.
+              uiOrder: 0
+              title: ID
+              type: string
+            metadata:
+              description: Metadata.
+              uiOrder: 3
+              required: []
+              title: Metadata
+              type: json
+            score:
+              description: A measure of similarity between this vector and the query vector. The higher the score, the more similar they are.
+              uiOrder: 1
+              title: Score
+              type: number
+            values:
+              description: Vector data values.
+              uiOrder: 2
+              items:
+                description: Each float value represents one dimension.
+                title: Value
+                type: number
+              title: Values
+              type: array
+          required:
+            - id
+            - score
+          title: Match
+          type: object
+        title: Matches
+        type: array
+      namespace:
+        description: The namespace of the query.
+        uiOrder: 0
+        title: Namespace
+        type: string
+    required:
+      - namespace
+      - matches
+    title: Output
+    type: object
+TASK_UPSERT:
+  shortDescription: Writes vectors into a namespace. If a new value is upserted for an existing vector id, it will overwrite the previous value.
+  description: >-
+    Writes vectors into a namespace. If a new value is upserted for an existing vector id, it will overwrite the previous value. This task will
+    be soon replaced by `TASK_BATCH_UPSERT`, which extends its functionality.
+  input:
+    uiOrder: 0
+    properties:
+      id:
+        description: This is the vector's unique id.
+        type: string
+        uiOrder: 0
+        title: ID
+      metadata:
+        description: The vector metadata.
+        type: object
+        shortDescription: The vector metadata
+        uiOrder: 3
+        order: 1
+        required: []
+        title: Metadata
+      values:
+        description: An array of dimensions for the vector to be saved.
+        type: array
+        uiOrder: 1
+        items:
+          description: A dimension of the vector.
+          example: 0.8167237
+          type: number
+        minItems: 1
+        title: Values
+      namespace:
+        description: The namespace to query.
+        type: string
+        uiOrder: 2
+        title: Namespace
+    required:
+      - id
+      - values
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      upserted-count:
+        description: Number of records modified or added.
+        uiOrder: 0
+        title: Upserted Count
+        type: integer
+    required:
+      - upserted-count
+    title: Output
+    type: object
+TASK_BATCH_UPSERT:
+  shortDescription: Writes vectors into a namespace. If a new value is upserted for an existing vector ID, it will overwrite the previous value.
+  input:
+    uiOrder: 0
+    properties:
+      vectors:
+        description: Array of vectors to upsert
+        uiOrder: 0
+        items:
+          properties:
+            id:
+              description: The unique ID of the vector.
+              uiOrder: 0
+              type: string
+              title: ID
+            metadata:
+              description: >-
+                The vector metadata. This is a set of key-value pairs that can be used to store additional information about the vector. The
+                values can have the following types: string, number, boolean, or array of strings.
+              uiOrder: 1
+              type: object
+              shortDescription: The vector metadata
+              required: []
+              title: Metadata
+            values:
+              description: An array of dimensions for the vector to be saved.
+              uiOrder: 2
+              type: array
+              items:
+                description: A dimension of the vector.
+                example: 0.8167237
+                type: number
+              minItems: 1
+              title: Values
+          required:
+            - id
+            - values
+          type: object
+        minItems: 1
+        title: Vectors
+        type: array
+      namespace:
+        description: The namespace to query.
+        type: string
+        uiOrder: 1
+        title: Namespace
+    required:
+      - vectors
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      upserted-count:
+        description: Number of records modified or added.
+        uiOrder: 0
+        title: Upserted Count
+        type: integer
+    required:
+      - upserted-count
+    title: Output
+    type: object
+TASK_RERANK:
+  shortDescription: Rerank documents, such as text passages, according to their relevance to a query.
+  description: >-
+    Rerank documents, such as text passages, according to their relevance to a query. The input is a list of documents and a query. The output
+    is a list of documents, sorted by relevance to the query.
+  input:
+    uiOrder: 0
+    properties:
+      query:
+        description: The query to rerank the documents.
+        type: string
+        instullUIMultiline: false
+        uiOrder: 0
+        title: Query
+      documents:
+        description: The documents to rerank.
+        uiOrder: 1
+        items:
+          type: string
+        minItems: 1
+        title: Documents
+        type: array
+      top-n:
+        description: The number of results to return sorted by relevance. Defaults to the number of inputs.
+        type: integer
+        uiOrder: 2
+        title: Top N
+    required:
+      - query
+      - documents
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      documents:
+        description: Reranked documents.
+        items:
+          title: Documents
+          type: string
+        uiOrder: 0
+        title: Reranked documents.
+        type: array
+      scores:
+        description: The relevance score of the documents normalized between 0 and 1.
+        items:
+          title: Score
+          type: number
+        uiOrder: 1
+        title: Scores
+        type: array
+    required:
+      - documents
+      - scores
+    title: Output
+    type: object

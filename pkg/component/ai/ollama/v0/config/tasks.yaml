@@ -1,0 +1,177 @@
+$defs:
+  multi-modal-content:
+    items:
+      properties:
+        image-url:
+          properties:
+            url:
+              description: Either a URL of the image or the base64 encoded image data.
+              title: URL
+              uiOrder: 0
+              type: string
+          required:
+            - url
+          title: Image URL
+          description: The image URL.
+          uiOrder: 0
+          type: object
+        text:
+          description: The text content.
+          title: Text
+          uiOrder: 1
+          type: string
+        type:
+          description: The type of the content part.
+          enum:
+            - text
+            - image_url
+          title: Type
+          uiOrder: 2
+          type: string
+      required:
+        - type
+      type: object
+    type: array
+  chat-message:
+    properties:
+      content:
+        $ref: "#/$defs/multi-modal-content"
+        description: The message content.
+        uiOrder: 1
+        title: Content
+      role:
+        description: The message role, i.e. 'system', 'user' or 'assistant'.
+        uiOrder: 0
+        title: Role
+        type: string
+    required:
+      - role
+      - content
+    title: Chat Message
+    type: object
+TASK_TEXT_GENERATION_CHAT:
+  shortDescription: Provide text outputs in response to text/image inputs.
+  description: >-
+    Open-source large language models (OSS LLMs) are artificial intelligence models with publicly accessible code and architecture, allowing
+    for free use, modification, and distribution. These models can provide performance comparable to proprietary alternatives. Ollama is a tool that enables
+    you to run and interact with OSS LLMs using limited computational resources. You can install Ollama from: [here](https://ollama.com).
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      chat-history:
+        description: >-
+          Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be
+          ignored and will not have any effect when this field is populated. Each message should adhere to the format: {"role": "The message role, i.e.
+          `system`, `user` or `assistant`", "content": "message content"}.
+        type: array
+        shortDescription: Incorporate external chat history, specifically previous messages within the conversation.
+        uiOrder: 4
+        items:
+          $ref: "#/$defs/chat-message"
+        title: Chat history
+      max-new-tokens:
+        default: 50
+        description: The maximum number of tokens for model to generate.
+        type: integer
+        uiOrder: 6
+        title: Max New Tokens
+      model:
+        example: moondream
+        description: The OSS model to be used, check [here](https://ollama.com/library) for list of models available.
+        type: string
+        uiOrder: 0
+        title: Model Name
+      prompt:
+        description: The prompt text.
+        type: string
+        uiOrder: 2
+        title: Prompt
+      prompt-images:
+        description: The prompt images.
+        type: array
+        uiOrder: 3
+        items:
+          type: string
+        title: Prompt Images
+      seed:
+        description: The seed.
+        type: integer
+        uiOrder: 4
+        title: Seed
+      system-message:
+        default: You are a helpful assistant.
+        description: >-
+          The system message helps set the behavior of the assistant. For example, you can modify the personality of the assistant or provide
+          specific instructions about how it should behave throughout the conversation. By default, the model's behavior is set using a generic message
+          as "You are a helpful assistant.".
+        type: string
+        shortDescription: The system message helps set the behavior of the assistant
+        uiOrder: 2
+        title: System Message
+      temperature:
+        default: 0.7
+        description: The temperature for sampling.
+        type: number
+        uiOrder: 5
+        title: Temperature
+      top-k:
+        default: 10
+        description: Top k for sampling.
+        type: integer
+        uiOrder: 5
+        title: Top K
+    required:
+      - prompt
+      - model
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      text:
+        description: Model Output.
+        uiOrder: 0
+        title: Text
+        type: string
+    required:
+      - text
+    title: Output
+    type: object
+TASK_TEXT_EMBEDDINGS:
+  shortDescription: Turn text into a vector of numbers that capture its meaning, unlocking use cases like semantic search.
+  description: An embedding is a list of floating point numbers that captures semantic information about the text that it represents.
+  input:
+    uiOrder: 0
+    properties:
+      model:
+        example: snowflake-arctic-embed:22m
+        description: The OSS model to be used, check [here](https://ollama.com/library) for list of models available.
+        type: string
+        uiOrder: 0
+        title: Model Name
+      text:
+        description: The text.
+        type: string
+        uiOrder: 1
+        title: Text
+    required:
+      - text
+      - model
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      embedding:
+        items:
+          type: number
+        description: Embedding of the input text.
+        uiOrder: 0
+        title: Embedding
+        type: array
+    required:
+      - embedding
+    title: Output
+    type: object

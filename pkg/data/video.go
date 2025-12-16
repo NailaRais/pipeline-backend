@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/instill-ai/pipeline-backend/pkg/data/format"
 	"github.com/instill-ai/pipeline-backend/pkg/data/path"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 )
 
 type videoData struct {
@@ -25,14 +27,15 @@ type videoData struct {
 func (videoData) IsValue() {}
 
 const (
-	MP4  = "video/mp4"
-	AVI  = "video/x-msvideo"
-	MOV  = "video/quicktime"
-	WEBM = "video/webm"
-	MKV  = "video/x-matroska"
-	FLV  = "video/x-flv"
-	WMV  = "video/x-ms-wmv"
-	MPEG = "video/mpeg"
+	MP4       = "video/mp4"
+	AVI       = "video/x-msvideo"
+	MOV       = "video/quicktime"
+	MKV       = "video/x-matroska"
+	FLV       = "video/x-flv"
+	WMV       = "video/x-ms-wmv"
+	ASF       = "video/x-ms-asf"
+	MPEG      = "video/mpeg"
+	WEBMVIDEO = "video/webm"
 )
 
 var videoGetters = map[string]func(*videoData) (format.Value, error){
@@ -44,32 +47,41 @@ var videoGetters = map[string]func(*videoData) (format.Value, error){
 	"avi":        func(v *videoData) (format.Value, error) { return v.Convert(AVI) },
 	"mov":        func(v *videoData) (format.Value, error) { return v.Convert(MOV) },
 	"wmv":        func(v *videoData) (format.Value, error) { return v.Convert(WMV) },
+	"asf":        func(v *videoData) (format.Value, error) { return v.Convert(ASF) },
 	"flv":        func(v *videoData) (format.Value, error) { return v.Convert(FLV) },
-	"webm":       func(v *videoData) (format.Value, error) { return v.Convert(WEBM) },
+	"webm":       func(v *videoData) (format.Value, error) { return v.Convert(WEBMVIDEO) },
 }
 
-func NewVideoFromBytes(b []byte, contentType, fileName string) (video *videoData, err error) {
-	return createVideoData(b, contentType, fileName)
+func NewVideoFromBytes(b []byte, contentType, filename string, isUnified bool) (video *videoData, err error) {
+	return createVideoData(b, contentType, filename, isUnified)
 }
 
-func NewVideoFromURL(url string) (video *videoData, err error) {
-	b, contentType, fileName, err := convertURLToBytes(url)
+func NewVideoFromURL(ctx context.Context, binaryFetcher external.BinaryFetcher, url string, isUnified bool) (video *videoData, err error) {
+	b, contentType, filename, err := binaryFetcher.FetchFromURL(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	return createVideoData(b, contentType, fileName)
+	return createVideoData(b, contentType, filename, isUnified)
 }
 
-func createVideoData(b []byte, contentType, fileName string) (*videoData, error) {
-	if contentType != MP4 {
-		var err error
-		b, err = convertVideo(b, contentType, MP4)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert video to MP4: %w", err)
+func createVideoData(b []byte, contentType, filename string, isUnified bool) (*videoData, error) {
+	// Normalize MIME type first
+	normalizedContentType := normalizeMIMEType(contentType)
+	finalContentType := normalizedContentType
+
+	// If the video should be unified, convert it to MP4 (the internal unified video format)
+	if isUnified {
+		if normalizedContentType != MP4 {
+			var err error
+			b, err = convertVideo(b, normalizedContentType, MP4)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert video to MP4: %w", err)
+			}
+			finalContentType = MP4
 		}
-		contentType = MP4
 	}
-	f, err := NewFileFromBytes(b, contentType, fileName)
+
+	f, err := NewFileFromBytes(b, finalContentType, filename)
 	if err != nil {
 		return nil, err
 	}
@@ -234,4 +246,43 @@ func (vid *videoData) Get(p *path.Path) (v format.Value, err error) {
 	}
 
 	return result.Get(remainingPath)
+}
+
+// videoData has unexported fields, which cannot be accessed by the regular
+// encoder / decoder. A custom encode/decode method pair is defined to send and
+// receive the type with the gob package.
+
+// encVideoData is redundant with videoData but allows us not to modify the
+// format.Image interface signature.
+type encVideoData struct {
+	encFileData
+	Width     int
+	Height    int
+	Duration  time.Duration
+	FrameRate float64
+}
+
+func (vid *videoData) GobEncode() ([]byte, error) {
+	return json.Marshal(encVideoData{
+		encFileData: vid.asEncodedStruct(),
+		Width:       vid.width,
+		Height:      vid.height,
+		Duration:    vid.duration,
+		FrameRate:   vid.frameRate,
+	})
+}
+
+func (vid *videoData) GobDecode(b []byte) error {
+	var ev encVideoData
+	if err := json.Unmarshal(b, &ev); err != nil {
+		return err
+	}
+
+	vid.fileData = ev.asFileData()
+	vid.width = ev.Width
+	vid.height = ev.Height
+	vid.duration = ev.Duration
+	vid.frameRate = ev.FrameRate
+
+	return nil
 }

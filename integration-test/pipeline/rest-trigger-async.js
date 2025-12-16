@@ -13,10 +13,10 @@ export function CheckTrigger(data) {
 
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
         description: randomString(50),
       },
-      constant.simplePipelineWithJSONRecipe
+      constant.simplePipelineWithYAMLRecipe
     );
 
     check(http.request("POST", `${pipelinePublicHost}/v1beta/${constant.namespace}/pipelines`, JSON.stringify(reqBody), data.header), {
@@ -40,7 +40,7 @@ export function CheckTrigger(data) {
 
     var reqBody = Object.assign(
       {
-        id: randomString(10),
+        id: constant.dbIDPrefix + randomString(10),
         description: randomString(50),
       },
       constant.simplePipelineWithYAMLRecipe

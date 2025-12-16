@@ -7,11 +7,11 @@ import (
 type property struct {
 	Description string `json:"description" validate:"required"`
 	Title       string `json:"title" validate:"required"`
-	Order       *int   `json:"instillUIOrder" validate:"required"`
+	Order       *int   `json:"uiOrder" validate:"required"`
 
 	Type string `json:"type"`
 
-	// If Type is array, Items defines the element type.
+	// If Type is array, Items defines the element format.
 	Items struct {
 		Type       string              `json:"type"`
 		Properties map[string]property `json:"properties" validate:"omitempty,dive"`
@@ -30,7 +30,7 @@ type property struct {
 
 type objectSchema struct {
 	Description string              `json:"description"`
-	Properties  map[string]property `json:"properties" validate:"gt=0,dive"`
+	Properties  map[string]property `json:"properties" validate:"dive"`
 	Title       string              `json:"title" validate:"required"`
 	Required    []string            `json:"required"`
 }
@@ -39,18 +39,18 @@ func (t *objectSchema) MarshalJSON() ([]byte, error) {
 	type Alias objectSchema
 	return json.Marshal(&struct {
 		*Alias
-		InstillShortDescription string `json:"instillShortDescription,omitempty"`
+		ShortDescription string `json:"shortDescription,omitempty"`
 	}{
-		Alias:                   (*Alias)(t),
-		InstillShortDescription: t.Description,
+		Alias:            (*Alias)(t),
+		ShortDescription: t.Description,
 	})
 }
 
 func (t *objectSchema) UnmarshalJSON(data []byte) error {
 	type Alias objectSchema
 	aux := &struct {
-		InstillShortDescription string `json:"instillShortDescription"`
-		Description             string `json:"description"`
+		ShortDescription string `json:"shortDescription"`
+		Description      string `json:"description"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -62,8 +62,8 @@ func (t *objectSchema) UnmarshalJSON(data []byte) error {
 	// Set Description based on the presence of the fields
 	if aux.Description != "" {
 		t.Description = aux.Description
-	} else if aux.InstillShortDescription != "" {
-		t.Description = aux.InstillShortDescription
+	} else if aux.ShortDescription != "" {
+		t.Description = aux.ShortDescription
 	}
 
 	return nil

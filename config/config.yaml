@@ -4,20 +4,18 @@ server:
   https:
     cert:
     key:
-  edition: local-ce:dev
+  edition: docker-ce:dev
   usage:
     enabled: true
     tlsenabled: true
-    host: usage.instill.tech
+    host: usage.instill-ai.com
     port: 443
   debug: true
-  maxdatasize: 12 # MB in unit
   workflow:
     maxworkflowtimeout: 3600 # in seconds
     maxworkflowretry: 1
     maxactivityretry: 1
   instanceid: "pipeline-backend"
-  datachanbuffersize: 100
   instillcorehost: http://localhost:8080
 component:
 database:
@@ -26,7 +24,6 @@ database:
   host: pg-sql
   port: 5432
   name: pipeline
-  version: 35
   timezone: Etc/UTC
   pool:
     idleconnections: 5
@@ -45,19 +42,17 @@ cache:
   redis:
     redisoptions:
       addr: redis:6379
-log:
-  external: false
-  otelcollector:
-    host: otel-collector
-    port: 8095
+otelcollector:
+  enable: false
+  host: otel-collector
+  port: 4317
 temporal:
   hostport: temporal:7233
-  namespace: pipeline-backend
+  namespace: instill-core
   retention: 1d
-  ca:
-  cert:
-  key:
-  servername:
+  metricsport: 8096
+  apikey:
+  insecureskipverify:
 mgmtbackend:
   host: mgmt-backend
   publicport: 8084
@@ -74,25 +69,27 @@ modelbackend:
 artifactbackend:
   host: artifact-backend
   publicport: 8082
+  privateport: 3082
   https:
     cert:
     key:
 openfga:
   host: openfga
   port: 8081
-instillcloud:
-  host: api.instill.tech
-  port: 443
 minio:
   host: minio
   port: 9000
-  rootuser: minioadmin
-  rootpwd: minioadmin
-  bucketname: instill-ai-vdp
+  user: minioadmin
+  password: minioadmin
+  bucketname: core-pipeline
   secure: false
-appbackend:
-  host: app-backend
+agentbackend:
+  host: agent-backend
   publicport: 8087
   https:
     cert:
     key:
+apigateway:
+  host: api-gateway
+  publicport: 8080
+  tlsenabled: false

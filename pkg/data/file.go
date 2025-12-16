@@ -2,26 +2,29 @@ package data
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
-	"mime"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/go-resty/resty/v2"
+	"github.com/gofrs/uuid"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/data/format"
 	"github.com/instill-ai/pipeline-backend/pkg/data/path"
+	"github.com/instill-ai/pipeline-backend/pkg/external"
 )
 
 const (
+	// OCTETSTREAM is a MIME type for binary data.
 	OCTETSTREAM = "application/octet-stream"
 )
 
 var fileGetters = map[string]func(*fileData) (format.Value, error){
 	"source-url":   func(f *fileData) (format.Value, error) { return f.SourceURL(), nil },
-	"filename":     func(f *fileData) (format.Value, error) { return f.FileName(), nil },
+	"filename":     func(f *fileData) (format.Value, error) { return f.Filename(), nil },
 	"file-size":    func(f *fileData) (format.Value, error) { return f.FileSize(), nil },
 	"content-type": func(f *fileData) (format.Value, error) { return f.ContentType(), nil },
 	"binary":       func(f *fileData) (format.Value, error) { return f.Binary() },
@@ -32,73 +35,50 @@ var fileGetters = map[string]func(*fileData) (format.Value, error){
 type fileData struct {
 	raw         []byte
 	contentType string
-	fileName    string
+	filename    string
 	sourceURL   string
 }
 
 func (fileData) IsValue() {}
 
-func NewFileFromBytes(b []byte, contentType, fileName string) (bin *fileData, err error) {
+// NewFileFromBytes creates a new fileData from a byte slice.
+// If the contentType is not provided, it will be detected from the byte slice.
+// If the filename is not provided, it will be generated from the byte slice.
+func NewFileFromBytes(b []byte, contentType, filename string) (bin *fileData, err error) {
 	if contentType == "" {
 		contentType = strings.Split(mimetype.Detect(b).String(), ";")[0]
+	}
+
+	if filename == "" {
+		fileUID, _ := uuid.NewV4()
+		filename = fmt.Sprintf("%s%s", fileUID, strings.ToLower(mimetype.Detect(b).Extension()))
 	}
 
 	f := &fileData{
 		raw:         b,
 		contentType: contentType,
-		fileName:    fileName,
+		filename:    filename,
 	}
 
 	return f, nil
 }
 
-func convertURLToBytes(url string) (b []byte, contentType string, fileName string, err error) {
-	if strings.HasPrefix(url, "data:") {
-		return convertDataURIToBytes(url)
-	}
-
-	client := resty.New().SetRetryCount(3)
-	resp, err := client.R().Get(url)
-	if err != nil {
-		return nil, "", "", err
-	}
-	body := resp.Body()
-	contentType = ""
-	if headers := resp.Header().Get("Content-Type"); headers != "" {
-		contentType = headers
-	}
-	fileName = ""
-	if disposition := resp.Header().Get("Content-Disposition"); disposition != "" {
-		if strings.HasPrefix(disposition, "attachment") {
-			if _, params, err := mime.ParseMediaType(disposition); err == nil {
-				if fn, ok := params["filename"]; ok {
-					fileName = fn
-				}
-			}
-		}
-	}
-	return body, contentType, fileName, nil
-}
-
-func NewFileFromURL(url string) (bin *fileData, err error) {
-	b, contentType, fileName, err := convertURLToBytes(url)
+// NewFileFromURL creates a new fileData from a URL.
+// The binaryFetcher is used to fetch the binary data from the URL.
+// If the contentType is not provided, it will be detected from the byte slice.
+// If the filename is not provided, it will be generated from the byte slice.
+func NewFileFromURL(ctx context.Context, binaryFetcher external.BinaryFetcher, url string) (bin *fileData, err error) {
+	b, contentType, filename, err := binaryFetcher.FetchFromURL(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	bin, err = NewFileFromBytes(b, contentType, fileName)
+
+	bin, err = NewFileFromBytes(b, contentType, filename)
 	if err != nil {
 		return nil, err
 	}
 	bin.sourceURL = url
 	return bin, nil
-}
-
-func convertDataURIToBytes(url string) (b []byte, contentType string, fileName string, err error) {
-	b, contentType, fileName, err = decodeDataURI(url)
-	if err != nil {
-		return
-	}
-	return b, contentType, fileName, nil
 }
 
 func (f *fileData) String() string {
@@ -147,8 +127,8 @@ func (f *fileData) ContentType() (t format.String) {
 	return NewString(f.contentType)
 }
 
-func (f *fileData) FileName() (t format.String) {
-	return NewString(f.fileName)
+func (f *fileData) Filename() (t format.String) {
+	return NewString(f.filename)
 }
 
 func (f *fileData) SourceURL() (t format.String) {
@@ -205,8 +185,64 @@ func (f *fileData) Equal(other format.Value) bool {
 		}
 		return bytes.Equal(f.raw, ba.ByteArray()) &&
 			f.contentType == other.ContentType().String() &&
-			f.fileName == other.FileName().String() &&
+			f.filename == other.Filename().String() &&
 			f.sourceURL == other.SourceURL().String()
 	}
 	return false
+}
+
+func (f *fileData) ToJSONValue() (v any, err error) {
+	base64str, err := f.Base64()
+	if err != nil {
+		return nil, err
+	}
+	return base64str.String(), nil
+}
+
+// fileData has unexported fields, which cannot be accessed by the regular
+// encoder / decoder. A custom encode/decode method pair is defined to send and
+// receive the type with the gob package.
+
+// encFileData is redundant with fileData but allows us not to modify the
+// format.File interface signature.
+type encFileData struct {
+	Raw         []byte
+	ContentType string
+	Filename    string
+	SourceURL   string
+}
+
+func (f fileData) asEncodedStruct() encFileData {
+	return encFileData{
+		Raw:         f.raw,
+		ContentType: f.contentType,
+		Filename:    f.filename,
+		SourceURL:   f.sourceURL,
+	}
+}
+
+func (ef encFileData) asFileData() fileData {
+	return fileData{
+		raw:         ef.Raw,
+		contentType: ef.ContentType,
+		filename:    ef.Filename,
+		sourceURL:   ef.SourceURL,
+	}
+}
+func (f *fileData) GobEncode() ([]byte, error) {
+	return json.Marshal(f.asEncodedStruct())
+}
+
+func (f *fileData) GobDecode(b []byte) error {
+	var ef encFileData
+	if err := json.Unmarshal(b, &ef); err != nil {
+		return err
+	}
+
+	f.raw = ef.Raw
+	f.contentType = ef.ContentType
+	f.filename = ef.Filename
+	f.sourceURL = ef.SourceURL
+
+	return nil
 }

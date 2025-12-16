@@ -42,7 +42,9 @@ func (c *SlackSetupConverter) Migrate() error {
 
 func (c *SlackSetupConverter) migrateConnection() error {
 	// fetch slack component ID
-	cds := componentstore.Init(c.Logger, nil, nil)
+	cds := componentstore.Init(componentstore.InitParams{
+		Logger: c.Logger,
+	})
 	cd, err := cds.GetDefinitionByID("slack", nil, nil)
 	if err != nil {
 		return fmt.Errorf("fetching slack component UID")
@@ -59,7 +61,7 @@ func (c *SlackSetupConverter) migrateConnection() error {
 
 			var setup map[string]any
 			if err := json.Unmarshal(conn.Setup, &setup); err != nil {
-				return fmt.Errorf("unmarshalling setup: %w", err)
+				return fmt.Errorf("unmarshaling setup: %w", err)
 			}
 
 			updated := c.updateToken(setup)

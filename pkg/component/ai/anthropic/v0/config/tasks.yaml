@@ -1,0 +1,184 @@
+$defs:
+  multi-modal-content:
+    items:
+      properties:
+        image-url:
+          properties:
+            url:
+              description: Either a URL of the image or the base64 encoded image data.
+              title: URL
+              uiOrder: 0
+              type: string
+          required:
+            - url
+          title: Image URL
+          description: The image URL.
+          uiOrder: 0
+          type: object
+        text:
+          description: The text content.
+          title: Text
+          uiOrder: 1
+          type: string
+        type:
+          description: The type of the content part.
+          enum:
+            - text
+            - image_url
+          title: Type
+          uiOrder: 2
+          type: string
+      required:
+        - type
+      type: object
+    type: array
+  chat-message:
+    properties:
+      content:
+        $ref: "#/$defs/multi-modal-content"
+        description: The message content.
+        uiOrder: 1
+        title: Content
+      role:
+        description: The message role, i.e. 'system', 'user' or 'assistant'.
+        uiOrder: 0
+        title: Role
+        type: string
+    required:
+      - role
+      - content
+    title: Chat Message
+    type: object
+  usage:
+    description: Usage tokens in Anthropic.
+    uiOrder: 1
+    properties:
+      input-tokens:
+        description: The input tokens used by Anthropic.
+        uiOrder: 2
+        title: Input Tokens
+        type: number
+      output-tokens:
+        description: The output tokens used by Anthropic.
+        uiOrder: 3
+        title: Output Tokens
+        type: number
+    required:
+      - input-tokens
+      - output-tokens
+    title: Usage
+    type: object
+TASK_TEXT_GENERATION_CHAT:
+  shortDescription: Provide text outputs in response to text inputs.
+  description: Anthropic's text generation models (often called generative pre-trained transformers or large language models) have been trained to understand
+    natural language, code, and images. The models provide text outputs in response to their inputs. The inputs to these models are also referred to as
+    "prompts". Designing a prompt is essentially how you “program” a large language model model, usually by providing instructions or some examples of how
+    to successfully complete a task.
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      chat-history:
+        description: >-
+          Incorporate external chat history, specifically previous messages within the conversation. Please note that System Message will be
+          ignored and will not have any effect when this field is populated. Each message should adhere to the format: {"role": "The message role, i.e.
+          `system`, `user` or `assistant`", "content": "message content"}.
+        type: array
+        shortDescription: >-
+          Incorporate external chat history, specifically previous messages within the conversation. (Note: Anthropic doesn't support sending images via
+          image-url, use the 'prompt-images' field instead)"
+        uiOrder: 4
+        items:
+          $ref: "#/$defs/chat-message"
+        title: Chat history
+      max-new-tokens:
+        default: 50
+        description: The maximum number of tokens for model to generate.
+        type: integer
+        uiOrder: 6
+        title: Max New Tokens
+      model-name:
+        enum:
+          - claude-3-5-sonnet-latest
+          - claude-3-5-sonnet-20241022
+          - claude-3-5-sonnet-20240620
+          - claude-3-opus-20240229
+          - claude-3-sonnet-20240229
+          - claude-3-haiku-20240307
+        example: claude-3-5-sonnet-latest
+        description: The Anthropic model to be used.
+        type: string
+        uiOrder: 0
+        instillCredentialMap:
+          values:
+            - claude-3-5-sonnet-latest
+            - claude-3-5-sonnet-20241022
+            - claude-3-5-sonnet-20240620
+            - claude-3-opus-20240229
+            - claude-3-sonnet-20240229
+            - claude-3-haiku-20240307
+          targets:
+            - setup.api-key
+        title: Model Name
+      prompt:
+        description: The prompt text.
+        type: string
+        uiOrder: 2
+        title: Prompt
+      prompt-images:
+        description: >-
+          The prompt images (Note: The prompt images will be injected in the order they are provided to the 'prompt' message. Anthropic doesn't support
+          sending images via image-url, use this field instead).
+        type: array
+        uiOrder: 3
+        items:
+          type: string
+        title: Prompt Images
+      seed:
+        description: >-
+          The seed (Note: Not supported by Anthropic Models).
+        type: integer
+        uiOrder: 4
+        title: Seed
+      system-message:
+        default: You are a helpful assistant.
+        description: >-
+          The system message helps set the behavior of the assistant. For example, you can modify the personality of the assistant or provide
+          specific instructions about how it should behave throughout the conversation. By default, the model's behavior is set using a generic message
+          as "You are a helpful assistant.".
+        type: string
+        shortDescription: The system message helps set the behavior of the assistant
+        uiOrder: 2
+        title: System Message
+      temperature:
+        default: 0.7
+        description: The temperature for sampling.
+        type: number
+        uiOrder: 5
+        title: Temperature
+      top-k:
+        default: 10
+        description: Top k for sampling.
+        type: integer
+        uiOrder: 5
+        title: Top K
+    required:
+      - prompt
+      - model-name
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      text:
+        description: Model Output.
+        uiOrder: 0
+        title: Text
+        type: string
+      usage:
+        $ref: "#/$defs/usage"
+    required:
+      - text
+    title: Output
+    type: object

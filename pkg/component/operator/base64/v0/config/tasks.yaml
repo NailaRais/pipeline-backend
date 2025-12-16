@@ -1,0 +1,56 @@
+TASK_DECODE:
+  shortDescription: Decode the base64 string.
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      data:
+        description: Base64 string to be decoded.
+        type: string
+        uiOrder: 0
+        title: Data
+    required:
+      - data
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      data:
+        description: Data.
+        uiOrder: 0
+        title: Data
+        type: string
+    required:
+      - data
+    title: Output
+    type: object
+TASK_ENCODE:
+  shortDescription: Encode data into base64 string
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      data:
+        description: Data to be encoded.
+        type: string
+        uiOrder: 0
+        title: Data
+    required:
+      - data
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      data:
+        description: Data.
+        uiOrder: 0
+        title: Data
+        type: string
+    required:
+      - data
+    title: Output
+    type: object

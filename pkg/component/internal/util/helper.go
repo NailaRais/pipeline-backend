@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -14,9 +15,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/h2non/filetype"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	timestampPB "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func GetFileExt(fileData []byte) string {
@@ -46,7 +47,7 @@ func WriteField(writer *multipart.Writer, key string, value string) {
 
 // ScrapeWebpageHTML scrape the HTML content of a webpage
 func ScrapeWebpageHTML(doc *goquery.Document) (string, error) {
-	return doc.Selection.Html()
+	return doc.Html()
 }
 
 // ScrapeWebpageTitle extracts and returns the title from the *goquery.Document
@@ -138,15 +139,24 @@ func GetFileTypeByFilename(filename string) (string, error) {
 
 func GetContentTypeFromBase64(base64String string) (string, error) {
 	// Remove the "data:" prefix and split at the first semicolon
-	contentType := strings.TrimPrefix(base64String, "data:")
+	if hasDataPrefix(base64String) {
+		contentType := strings.TrimPrefix(base64String, "data:")
 
-	parts := strings.SplitN(contentType, ";", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid format")
+		parts := strings.SplitN(contentType, ";", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid format")
+		}
+
+		// The first part is the content type
+		return parts[0], nil
 	}
 
-	// The first part is the content type
-	return parts[0], nil
+	b, err := base64.StdEncoding.DecodeString(base64String)
+	if err != nil {
+		return "", fmt.Errorf("decode base64 string: %w", err)
+	}
+	mimeType := strings.Split(mimetype.Detect(b).String(), ";")[0]
+	return mimeType, nil
 }
 
 func GetFileBase64Content(base64String string) string {
@@ -188,6 +198,7 @@ func StripProtocolFromURL(url string) string {
 	if index > 0 {
 		return url[strings.Index(url, "://")+3:]
 	}
+
 	return url
 }
 
@@ -195,14 +206,29 @@ func GetHeaderAuthorization(vars map[string]any) string {
 	if v, ok := vars["__PIPELINE_HEADER_AUTHORIZATION"]; ok {
 		return v.(string)
 	}
+
 	return ""
 }
 func GetInstillUserUID(vars map[string]any) string {
-	return vars["__PIPELINE_USER_UID"].(string)
+	if v, ok := vars["__PIPELINE_USER_UID"]; ok && v != nil {
+		return v.(string)
+	}
+	return ""
 }
 
 func GetInstillRequesterUID(vars map[string]any) string {
-	return vars["__PIPELINE_REQUESTER_UID"].(string)
+	if v, ok := vars["__PIPELINE_REQUESTER_UID"]; ok && v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
+func GetOriginalHeader(vars map[string]any) map[string]any {
+	if v, ok := vars["__ORIGINAL_HEADER"]; ok {
+		return v.(map[string]any)
+	}
+
+	return nil
 }
 
 func ConvertDataFrameToMarkdownTable(rows [][]string) string {
@@ -290,7 +316,7 @@ func ExecutePythonCode(pythonCode string, params map[string]interface{}) ([]byte
 		errChan <- nil
 	}()
 
-	outputBytes, err := cmdRunner.CombinedOutput()
+	outputBytes, err := cmdRunner.Output()
 
 	if err != nil {
 		errorStr := string(outputBytes)
@@ -309,6 +335,24 @@ func TrimBase64Mime(b64 string) string {
 	return splitB64[len(splitB64)-1]
 }
 
-func FormatToISO8601(ts *timestampPB.Timestamp) string {
+func FormatToISO8601(ts *timestamppb.Timestamp) string {
 	return ts.AsTime().UTC().Format(time.RFC3339)
+}
+
+// UnixToISO8601 converts a Unix timestamp to an ISO8601 formatted string
+func UnixToISO8601(unix int64) string {
+	return time.Unix(unix, 0).UTC().Format(time.RFC3339)
+}
+
+// return the extension of the file from the base64 string, in the "jpeg" , "png" format, check with provided header
+func GetBase64FileExtension(b64 string) string {
+	splitB64 := strings.Split(b64, ",")
+	header := splitB64[0]
+	header = strings.TrimPrefix(header, "data:")
+	header = strings.TrimSuffix(header, ";base64")
+	mtype, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		return err.Error()
+	}
+	return strings.Split(mtype, "/")[1]
 }

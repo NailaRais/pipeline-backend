@@ -4,6 +4,7 @@ package openai
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,9 +17,13 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/instill-ai/pipeline-backend/pkg/component/base"
+	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util"
 	"github.com/instill-ai/pipeline-backend/pkg/component/internal/util/httpclient"
+	"github.com/instill-ai/pipeline-backend/pkg/component/resources/schemas"
 	"github.com/instill-ai/pipeline-backend/pkg/data"
-	"github.com/instill-ai/x/errmsg"
+	"github.com/instill-ai/pipeline-backend/pkg/data/format"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 const (
@@ -36,12 +41,12 @@ const (
 )
 
 var (
-	//go:embed config/definition.json
-	definitionJSON []byte
-	//go:embed config/setup.json
-	setupJSON []byte
-	//go:embed config/tasks.json
-	tasksJSON []byte
+	//go:embed config/definition.yaml
+	definitionYAML []byte
+	//go:embed config/setup.yaml
+	setupYAML []byte
+	//go:embed config/tasks.yaml
+	tasksYAML []byte
 
 	once sync.Once
 	comp *component
@@ -58,7 +63,10 @@ type component struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		additionalYAMLBytes := map[string][]byte{
+			"schema.yaml": schemas.SchemaYAML,
+		}
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, additionalYAMLBytes)
 		if err != nil {
 			panic(err)
 		}
@@ -143,10 +151,10 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 
 		messages := []interface{}{}
 
-		// If chat history is provided, add it to the messages, and ignore the system message
 		if inputStruct.ChatHistory != nil {
 			for _, chat := range inputStruct.ChatHistory {
-				if chat.Role == "user" {
+				switch chat.Role {
+				case "user":
 					cs := make([]Content, len(chat.Content))
 					for i, c := range chat.Content {
 						cs[i] = Content{
@@ -161,7 +169,7 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 						}
 					}
 					messages = append(messages, multiModalMessage{Role: chat.Role, Content: cs})
-				} else {
+				case "assistant":
 					content := ""
 					for _, c := range chat.Content {
 						// OpenAI doesn't support multi-modal content for
@@ -172,15 +180,28 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 					}
 					messages = append(messages, message{Role: chat.Role, Content: content})
 				}
-
 			}
-		} else if inputStruct.SystemMessage != nil {
-			// If chat history is not provided, add the system message to the messages
+		}
+		if inputStruct.SystemMessage != nil {
 			messages = append(messages, message{Role: "system", Content: *inputStruct.SystemMessage})
 		}
 		userContents := []Content{}
 		userContents = append(userContents, Content{Type: "text", Text: &inputStruct.Prompt})
 		for _, image := range inputStruct.Images {
+
+			width := image.Width().Integer()
+			height := image.Height().Integer()
+
+			newWidth, newHeight := resizeImage(width, height)
+
+			// Only resize if dimensions changed
+			if newWidth != width || newHeight != height {
+				image, err = image.Resize(newWidth, newHeight)
+				if err != nil {
+					job.Error.Error(ctx, err)
+					return
+				}
+			}
 			i, err := image.DataURI()
 			if err != nil {
 				job.Error.Error(ctx, err)
@@ -190,165 +211,198 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 		}
 		messages = append(messages, multiModalMessage{Role: "user", Content: userContents})
 
-		// Note: The o1-series models don't support streaming.
-		if inputStruct.Model == "o1-preview" || inputStruct.Model == "o1-mini" {
-
-			body := textCompletionReq{
-				Messages:         messages,
-				Model:            inputStruct.Model,
-				MaxTokens:        inputStruct.MaxTokens,
-				Temperature:      inputStruct.Temperature,
-				N:                inputStruct.N,
-				TopP:             inputStruct.TopP,
-				PresencePenalty:  inputStruct.PresencePenalty,
-				FrequencyPenalty: inputStruct.FrequencyPenalty,
-			}
-			resp := textCompletionResp{}
-			req := client.R().SetResult(&resp).SetBody(body)
-			if _, err := req.Post(completionsPath); err != nil {
-				job.Error.Error(ctx, err)
-				return
-			}
-
-			outputStruct := taskTextGenerationOutput{
-				Texts: []string{},
-				Usage: usage(resp.Usage),
-			}
-			for _, c := range resp.Choices {
-				outputStruct.Texts = append(outputStruct.Texts, c.Message.Content)
-			}
-
-			err = job.Output.WriteData(ctx, outputStruct)
-			if err != nil {
-				job.Error.Error(ctx, err)
-				return
-			}
-
-		} else {
-			body := textCompletionReq{
-				Messages:         messages,
-				Model:            inputStruct.Model,
-				MaxTokens:        inputStruct.MaxTokens,
-				Temperature:      inputStruct.Temperature,
-				N:                inputStruct.N,
-				TopP:             inputStruct.TopP,
-				PresencePenalty:  inputStruct.PresencePenalty,
-				FrequencyPenalty: inputStruct.FrequencyPenalty,
-				Stream:           true,
-				StreamOptions: &streamOptions{
-					IncludeUsage: true,
-				},
-			}
-
-			// workaround, the OpenAI service can not accept this param
-			if inputStruct.Model != "gpt-4-vision-preview" {
-				if inputStruct.ResponseFormat != nil {
-					body.ResponseFormat = &responseFormatReqStruct{
-						Type: inputStruct.ResponseFormat.Type,
-					}
-					if inputStruct.ResponseFormat.Type == "json_schema" {
-						if inputStruct.Model == "gpt-4o-mini" || inputStruct.Model == "gpt-4o-2024-08-06" {
-							sch := map[string]any{}
-							if inputStruct.ResponseFormat.JSONSchema != "" {
-								err = json.Unmarshal([]byte(inputStruct.ResponseFormat.JSONSchema), &sch)
-								if err != nil {
-									job.Error.Error(ctx, err)
-									return
-								}
-								body.ResponseFormat = &responseFormatReqStruct{
-									Type:       inputStruct.ResponseFormat.Type,
-									JSONSchema: sch,
-								}
-							}
-
-						} else {
-							job.Error.Error(ctx, fmt.Errorf("this model doesn't support response format: json_schema"))
-							return
-						}
-
-					}
-				}
-
-			}
-
-			req := client.SetDoNotParseResponse(true).R().SetBody(body)
-			restyResp, err := req.Post(completionsPath)
-			if err != nil {
-				job.Error.Error(ctx, err)
-				return
-			}
-
-			if restyResp.StatusCode() != 200 {
-				rawBody := restyResp.RawBody()
-				defer rawBody.Close()
-				bodyBytes, err := io.ReadAll(rawBody)
-				job.Error.Error(ctx, fmt.Errorf("send request to openai error with error code: %d, msg %s, %s", restyResp.StatusCode(), bodyBytes, err))
-				return
-			}
-			scanner := bufio.NewScanner(restyResp.RawResponse.Body)
-
-			outputStruct := taskTextGenerationOutput{}
-
-			u := usage{}
-			count := 0
-			for scanner.Scan() {
-
-				res := scanner.Text()
-
-				if len(res) == 0 {
-					continue
-				}
-				res = strings.Replace(res, "data: ", "", 1)
-
-				// Note: Since we haven’t provided delta updates for the
-				// messages, we’re reducing the number of event streams by
-				// returning the response every ten iterations.
-				if count == 3 || res == "[DONE]" {
-					err = job.Output.WriteData(ctx, outputStruct)
-					if err != nil {
-						job.Error.Error(ctx, err)
-						return
-					}
-					if res == "[DONE]" {
-						break
-					}
-					count = 0
-				}
-
-				count += 1
-				response := &textCompletionStreamResp{}
-				err = json.Unmarshal([]byte(res), response)
+		tools := make([]toolReqStruct, len(inputStruct.Tools))
+		for i, tool := range inputStruct.Tools {
+			params := make(map[string]any)
+			for k, v := range tool.Function.Parameters {
+				params[k], err = v.ToJSONValue()
 				if err != nil {
 					job.Error.Error(ctx, err)
 					return
 				}
-
-				for _, c := range response.Choices {
-					// Now, there is no document to describe it.
-					// But, when we test it, we found that the choices idx is not in order.
-					// So, we need to get idx from the choice, and the len of the choices is always 1.
-					responseIdx := c.Index
-					if len(outputStruct.Texts) <= responseIdx {
-						outputStruct.Texts = append(outputStruct.Texts, "")
-					}
-					outputStruct.Texts[responseIdx] += c.Delta.Content
-
-				}
-
-				u = usage{
-					PromptTokens:     response.Usage.PromptTokens,
-					CompletionTokens: response.Usage.CompletionTokens,
-					TotalTokens:      response.Usage.TotalTokens,
-				}
-
 			}
+			tools[i] = toolReqStruct{
+				Type: "function",
+				Function: functionReqStruct{
+					Name:        tool.Function.Name,
+					Parameters:  params,
+					Strict:      tool.Function.Strict,
+					Description: tool.Function.Description,
+				},
+			}
+		}
 
-			outputStruct.Usage = u
-			err = job.Output.WriteData(ctx, outputStruct)
+		var toolChoice any
+		switch choice := inputStruct.ToolChoice.(type) {
+		case data.Map:
+			toolChoice, err = choice.ToJSONValue()
 			if err != nil {
 				job.Error.Error(ctx, err)
 				return
 			}
+		case format.String:
+			toolChoice = choice.String()
+		}
+
+		body := textCompletionReq{
+			Messages:         messages,
+			Model:            inputStruct.Model,
+			MaxTokens:        inputStruct.MaxTokens,
+			Temperature:      inputStruct.Temperature,
+			N:                inputStruct.N,
+			TopP:             inputStruct.TopP,
+			PresencePenalty:  inputStruct.PresencePenalty,
+			FrequencyPenalty: inputStruct.FrequencyPenalty,
+			Stream:           true,
+			StreamOptions: &streamOptions{
+				IncludeUsage: true,
+			},
+			ReasoningEffort: inputStruct.ReasoningEffort,
+			Verbosity:       inputStruct.Verbosity,
+		}
+
+		if inputStruct.Prediction != nil {
+			body.Prediction = &predictionReqStruct{
+				Type:    "content",
+				Content: inputStruct.Prediction.Content,
+			}
+		}
+		if len(tools) > 0 {
+			body.Tools = tools
+		}
+		if toolChoice != nil {
+			body.ToolChoice = toolChoice
+		}
+
+		if inputStruct.ResponseFormat != nil {
+			body.ResponseFormat = &responseFormatReqStruct{
+				Type: inputStruct.ResponseFormat.Type,
+			}
+			if inputStruct.ResponseFormat.Type == "json_schema" {
+				sch := map[string]any{}
+				if inputStruct.ResponseFormat.JSONSchema != "" {
+					err = json.Unmarshal([]byte(inputStruct.ResponseFormat.JSONSchema), &sch)
+					if err != nil {
+						job.Error.Error(ctx, err)
+						return
+					}
+					body.ResponseFormat = &responseFormatReqStruct{
+						Type:       inputStruct.ResponseFormat.Type,
+						JSONSchema: sch,
+					}
+				}
+			}
+		}
+
+		req := client.SetDoNotParseResponse(true).R().SetBody(body)
+		restyResp, err := req.Post(completionsPath)
+		if err != nil {
+			job.Error.Error(ctx, err)
+			return
+		}
+
+		if restyResp.StatusCode() != 200 {
+			rawBody := restyResp.RawBody()
+			defer rawBody.Close()
+			bodyBytes, err := io.ReadAll(rawBody)
+			job.Error.Error(ctx, fmt.Errorf("send request to openai error with error code: %d, msg %s, %s", restyResp.StatusCode(), bodyBytes, err))
+			return
+		}
+		scanner := bufio.NewScanner(restyResp.RawResponse.Body)
+
+		outputStruct := taskTextGenerationOutput{}
+		toolCalls := make(map[int]*toolCall)
+
+		u := usage{}
+		count := 0
+		for scanner.Scan() {
+			res := scanner.Text()
+
+			if len(res) == 0 {
+				continue
+			}
+			res = strings.Replace(res, "data: ", "", 1)
+
+			// Note: Since we haven't provided delta updates for the
+			// messages, we're reducing the number of event streams by
+			// returning the response every ten iterations.
+			if count == 3 || res == "[DONE]" {
+				err = job.Output.WriteData(ctx, outputStruct)
+				if err != nil {
+					job.Error.Error(ctx, err)
+					return
+				}
+				if res == "[DONE]" {
+					break
+				}
+				count = 0
+			}
+
+			count += 1
+			response := &textCompletionStreamResp{}
+			err = json.Unmarshal([]byte(res), response)
+			if err != nil {
+				job.Error.Error(ctx, err)
+				return
+			}
+
+			for _, c := range response.Choices {
+				responseIdx := c.Index
+				if len(outputStruct.Texts) <= responseIdx {
+					outputStruct.Texts = append(outputStruct.Texts, "")
+				}
+				outputStruct.Texts[responseIdx] += c.Delta.Content
+
+				// Collect tool calls
+				for _, t := range c.Delta.ToolCalls {
+					if _, exists := toolCalls[t.Index]; !exists {
+						toolCalls[t.Index] = &toolCall{
+							Type: t.Type,
+							Function: functionCall{
+								Name:      t.Function.Name,
+								Arguments: t.Function.Arguments,
+							},
+						}
+					} else {
+						// Append arguments for existing tool call
+						toolCalls[t.Index].Function.Arguments += t.Function.Arguments
+					}
+				}
+			}
+
+			u = usage{
+				PromptTokens:     response.Usage.PromptTokens,
+				CompletionTokens: response.Usage.CompletionTokens,
+				TotalTokens:      response.Usage.TotalTokens,
+				PromptTokenDetails: &promptTokenDetails{
+					AudioTokens:  response.Usage.PromptTokenDetails.AudioTokens,
+					CachedTokens: response.Usage.PromptTokenDetails.CachedTokens,
+				},
+				CompletionTokenDetails: &completionTokenDetails{
+					ReasoningTokens:          response.Usage.CompletionTokenDetails.ReasoningTokens,
+					AudioTokens:              response.Usage.CompletionTokenDetails.AudioTokens,
+					AcceptedPredictionTokens: response.Usage.CompletionTokenDetails.AcceptedPredictionTokens,
+					RejectedPredictionTokens: response.Usage.CompletionTokenDetails.RejectedPredictionTokens,
+				},
+			}
+		}
+
+		// Convert collected tool calls to output format
+		for _, tc := range toolCalls {
+			outputStruct.ToolCalls = append(outputStruct.ToolCalls, toolCall{
+				Type: tc.Type,
+				Function: functionCall{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			})
+		}
+
+		outputStruct.Usage = u
+		err = job.Output.WriteData(ctx, outputStruct)
+		if err != nil {
+			job.Error.Error(ctx, err)
+			return
 		}
 
 	case SpeechRecognitionTask:
@@ -419,7 +473,7 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 			return
 		}
 
-		audio, err := data.NewAudioFromBytes(resp.Body(), "audio/wav", "")
+		audio, err := data.NewAudioFromBytes(resp.Body(), "audio/wav", "", true)
 		if err != nil {
 			job.Error.Error(ctx, err)
 			return
@@ -462,7 +516,12 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 
 		results := []imageGenerationsOutputResult{}
 		for _, d := range resp.Data {
-			img, err := data.NewImageFromURL(fmt.Sprintf("data:image/webp;base64,%s", d.Image))
+			b, err := base64.StdEncoding.DecodeString(util.TrimBase64Mime(d.Image))
+			if err != nil {
+				job.Error.Error(ctx, err)
+				return
+			}
+			img, err := data.NewImageFromBytes(b, data.PNG, "", true)
 			if err != nil {
 				job.Error.Error(ctx, err)
 				return
@@ -483,7 +542,7 @@ func (e *execution) worker(ctx context.Context, client *httpclient.Client, job *
 		}
 
 	default:
-		job.Error.Error(ctx, errmsg.AddMessage(
+		job.Error.Error(ctx, errorsx.AddMessage(
 			fmt.Errorf("not supported task: %s", e.Task),
 			fmt.Sprintf("%s task is not supported.", e.Task),
 		))

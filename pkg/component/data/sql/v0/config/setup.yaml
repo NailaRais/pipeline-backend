@@ -1,0 +1,123 @@
+additionalProperties: false
+properties:
+  engine:
+    description: Choose the engine of your database.
+    type: string
+    uiOrder: 0
+    title: Engine
+    enum:
+      - MySQL
+      - PostgreSQL
+      - SQL Server
+      - Oracle
+      - MariaDB
+      - Firebird
+  username:
+    description: Fill in your account username.
+    type: string
+    uiOrder: 1
+    title: Username
+  password:
+    description: Fill in your account password.
+    type: string
+    instillSecret: true
+    uiOrder: 2
+    title: Password
+  database-name:
+    description: Fill in the name of your database.
+    type: string
+    uiOrder: 3
+    title: Database Name
+  host:
+    description: Fill in the host of your database.
+    type: string
+    uiOrder: 4
+    title: Host
+  port:
+    description: Fill in the port of your database.
+    default: 3306
+    type: number
+    uiOrder: 5
+    title: Port
+  ssl-tls:
+    description: Enable SSL / TLS.
+    uiOrder: 6
+    oneOf:
+      - properties:
+          ssl-tls-type:
+            const: NO TLS
+            description: Choose the type of SSL / TLS.
+            uiOrder: 0
+            order: 0
+            title: SSL / TLS Type
+            type: string
+        required:
+          - ssl-tls-type
+        title: No SSL / TLS
+      - properties:
+          ssl-tls-type:
+            const: TLS
+            description: Choose the type of SSL / TLS.
+            uiOrder: 0
+            order: 0
+            title: SSL / TLS Type
+            type: string
+          ssl-tls-ca:
+            description: Base64 encoded CA certificate file.
+            shortDescription: Base64 encoded CA certificate file
+            type: string
+            uiOrder: 1
+            order: 1
+            title: CA Certificate
+        required:
+          - ssl-tls-type
+          - ssl-tls-ca
+        title: TLS
+      - properties:
+          ssl-tls-type:
+            const: mTLS
+            description: Choose the type of SSL / TLS.
+            uiOrder: 0
+            order: 0
+            title: SSL / TLS Type
+            type: string
+          ssl-tls-ca:
+            description: Base64 encoded CA certificate file.
+            shortDescription: Base64 encoded CA certificate file
+            type: string
+            uiOrder: 1
+            order: 1
+            title: CA Certificate
+          ssl-tls-cert:
+            description: Base64 encoded client certificate file.
+            shortDescription: Base64 encoded client certificate file
+            type: string
+            uiOrder: 2
+            order: 2
+            title: Client Certificate
+          ssl-tls-key:
+            description: Base64 encoded client key file.
+            shortDescription: Base64 encoded client key file
+            type: string
+            uiOrder: 3
+            order: 3
+            title: Client Key
+        required:
+          - ssl-tls-type
+          - ssl-tls-ca
+          - ssl-tls-cert
+          - ssl-tls-key
+        title: mTLS
+    order: 6
+    title: SSL / TLS
+    type: object
+required:
+  - engine
+  - username
+  - password
+  - database-name
+  - host
+  - port
+  - ssl-tls
+title: SQL Connection
+type: object

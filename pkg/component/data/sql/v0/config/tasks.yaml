@@ -1,0 +1,286 @@
+TASK_INSERT:
+  shortDescription: Perform insert operation
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to insert data into.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      data:
+        description: The data to be inserted.
+        type: object
+        uiOrder: 1
+        items:
+          title: Object
+          type: json
+        title: Data
+        required: []
+    required:
+      - data
+      - table-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Insert status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_INSERT_MANY:
+  shortDescription: Perform insert operation with multiple rows
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to insert data into.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      array-data:
+        description: The array data to be inserted.
+        type: array
+        uiOrder: 1
+        title: Data
+        items:
+          description: The data to be inserted.
+          title: Data
+          required: []
+          type: object
+        minItems: 1
+    required:
+      - array-data
+      - table-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Insert many status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_UPDATE:
+  shortDescription: Perform update operation
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to update data into.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      filter:
+        shortDescription: The filter to be applied to the data
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause.
+        uiOrder: 1
+        type: string
+        title: Filter
+      update-data:
+        description: The new data to be updated to.
+        type: object
+        uiOrder: 2
+        items:
+          title: Object
+          type: json
+        title: Update
+        required: []
+    required:
+      - filter
+      - update-data
+      - table-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Update status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_SELECT:
+  shortDescription: Perform select operation
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to be selected.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      filter:
+        shortDescription: The filter to be applied to the data. If empty, then all rows will be updated
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause, empty for all rows.
+        uiOrder: 1
+        type: string
+        title: Filter
+      limit:
+        description: The limit of rows to be selected, empty for all rows.
+        type: integer
+        shortDescription: Limit Rows
+        uiOrder: 2
+        title: Limit
+      columns:
+        description: The columns to return in the rows. If empty then all columns will be returned.
+        type: array
+        shortDescription: Columns to be returned, empty for all columns
+        uiOrder: 3
+        title: Columns
+        items:
+          title: Column
+          type: string
+        minItems: 1
+    required:
+      - table-name
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      rows:
+        description: The rows returned from the select operation.
+        uiOrder: 0
+        required: []
+        title: Rows
+        items:
+          title: Row
+          required: []
+          type: json
+        type: array
+      status:
+        description: Select status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+      - rows
+    title: Output
+    type: object
+TASK_DELETE:
+  shortDescription: Perform delete operation
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to be deleted.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      filter:
+        shortDescription: The filter to be applied to the data
+        description: The filter to be applied to the data with SQL syntax, which starts with WHERE clause.
+        uiOrder: 1
+        type: string
+        title: Filter
+    required:
+      - filter
+      - table-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Delete status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_CREATE_TABLE:
+  shortDescription: Create a table in the database
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to be created.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+      columns-structure:
+        description: >-
+          The columns structure to be created in the table, json with value string, e.g {"name": "VARCHAR(255)", "age": "INT not null"}.
+        type: object
+        shortDescription: >-
+          Columns Structure, e.g {"name": "VARCHAR(255)", "age": "INT not null"}
+        uiOrder: 1
+        title: Columns
+        required: []
+    required:
+      - table-name
+      - columns-structure
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Create table status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object
+TASK_DROP_TABLE:
+  shortDescription: Drop a table in the database
+  input:
+    uiOrder: 0
+    properties:
+      table-name:
+        description: The table name in the database to be dropped.
+        type: string
+        shortDescription: Database Table Name
+        uiOrder: 0
+        title: Table Name
+    required:
+      - table-name
+    title: Input
+    type: object
+  output:
+    uiOrder: 0
+    properties:
+      status:
+        description: Drop table status.
+        required: []
+        uiOrder: 0
+        title: Status
+        type: string
+    required:
+      - status
+    title: Output
+    type: object

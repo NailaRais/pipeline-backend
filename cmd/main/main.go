@@ -2,274 +2,114 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/gofrs/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/redis/go-redis/v9"
-	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
-	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
+	"gorm.io/gorm"
 
-	grpcmiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpczap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
-	grpcrecovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	openfga "github.com/openfga/api/proto/openfga/v1"
+	temporalclient "go.temporal.io/sdk/client"
 
 	"github.com/instill-ai/pipeline-backend/config"
 	"github.com/instill-ai/pipeline-backend/pkg/acl"
-	"github.com/instill-ai/pipeline-backend/pkg/constant"
 	"github.com/instill-ai/pipeline-backend/pkg/external"
 	"github.com/instill-ai/pipeline-backend/pkg/handler"
-	"github.com/instill-ai/pipeline-backend/pkg/logger"
 	"github.com/instill-ai/pipeline-backend/pkg/memory"
 	"github.com/instill-ai/pipeline-backend/pkg/middleware"
+	"github.com/instill-ai/pipeline-backend/pkg/pubsub"
 	"github.com/instill-ai/pipeline-backend/pkg/repository"
 	"github.com/instill-ai/pipeline-backend/pkg/service"
 	"github.com/instill-ai/pipeline-backend/pkg/usage"
 	"github.com/instill-ai/x/temporal"
-	"github.com/instill-ai/x/zapadapter"
 
 	componentstore "github.com/instill-ai/pipeline-backend/pkg/component/store"
 	database "github.com/instill-ai/pipeline-backend/pkg/db"
-	customotel "github.com/instill-ai/pipeline-backend/pkg/logger/otel"
-	pipelineworker "github.com/instill-ai/pipeline-backend/pkg/worker"
-	pb "github.com/instill-ai/protogen-go/vdp/pipeline/v1beta"
+	artifactpb "github.com/instill-ai/protogen-go/artifact/artifact/v1alpha"
+	mgmtpb "github.com/instill-ai/protogen-go/core/mgmt/v1beta"
+	usagepb "github.com/instill-ai/protogen-go/core/usage/v1beta"
+	pipelinepb "github.com/instill-ai/protogen-go/pipeline/pipeline/v1beta"
+	clientx "github.com/instill-ai/x/client"
+	clientgrpcx "github.com/instill-ai/x/client/grpc"
+	logx "github.com/instill-ai/x/log"
 	miniox "github.com/instill-ai/x/minio"
+	otelx "github.com/instill-ai/x/otel"
+	servergrpcx "github.com/instill-ai/x/server/grpc"
+	gatewayx "github.com/instill-ai/x/server/grpc/gateway"
 )
 
 const gracefulShutdownWaitPeriod = 15 * time.Second
 const gracefulShutdownTimeout = 60 * time.Minute
 
-var propagator propagation.TextMapPropagator
-
-func grpcHandlerFunc(grpcServer *grpc.Server, gwHandler http.Handler) http.Handler {
-	return h2c.NewHandler(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			propagator = b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader))
-			ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
-			r = r.WithContext(ctx)
-
-			if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
-				grpcServer.ServeHTTP(w, r)
-			} else {
-				gwHandler.ServeHTTP(w, r)
-			}
-		}),
-		&http2.Server{},
-	)
-}
-
-// InitPipelinePublicServiceClient initialises a PipelineServiceClient instance
-func InitPipelinePublicServiceClient(ctx context.Context) (pb.PipelinePublicServiceClient, *grpc.ClientConn) {
-	logger, _ := logger.GetZapLogger(ctx)
-
-	var clientDialOpts grpc.DialOption
-	var creds credentials.TransportCredentials
-	var err error
-	if config.Config.Server.HTTPS.Cert != "" && config.Config.Server.HTTPS.Key != "" {
-		creds, err = credentials.NewServerTLSFromFile(config.Config.Server.HTTPS.Cert, config.Config.Server.HTTPS.Key)
-		if err != nil {
-			logger.Fatal(err.Error())
-		}
-		clientDialOpts = grpc.WithTransportCredentials(creds)
-	} else {
-		clientDialOpts = grpc.WithTransportCredentials(insecure.NewCredentials())
-	}
-
-	clientConn, err := grpc.NewClient(fmt.Sprintf(":%v", config.Config.Server.PublicPort), clientDialOpts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constant.MaxPayloadSize), grpc.MaxCallSendMsgSize(constant.MaxPayloadSize)))
-	if err != nil {
-		logger.Error(err.Error())
-		return nil, nil
-	}
-
-	return pb.NewPipelinePublicServiceClient(clientConn), clientConn
-}
+var (
+	// These variables might be overridden at buildtime.
+	serviceName    = "pipeline-backend"
+	serviceVersion = "dev"
+)
 
 func main() {
+
 	if err := config.Init(config.ParseConfigFlag()); err != nil {
 		log.Fatal(err.Error())
 	}
 
-	// setup tracing and metrics
 	ctx, cancel := context.WithCancel(context.Background())
-
-	if tp, err := customotel.SetupTracing(ctx, "pipeline-backend"); err != nil {
-		panic(err)
-	} else {
-		defer func() {
-			err = tp.Shutdown(ctx)
-		}()
-	}
-
-	ctx, span := otel.Tracer("main-tracer").Start(ctx,
-		"main",
-	)
 	defer cancel()
 
-	logger, _ := logger.GetZapLogger(ctx)
+	// Setup all OpenTelemetry components
+	cleanup := otelx.SetupWithCleanup(ctx,
+		otelx.WithServiceName(serviceName),
+		otelx.WithServiceVersion(serviceVersion),
+		otelx.WithHost(config.Config.OTELCollector.Host),
+		otelx.WithPort(config.Config.OTELCollector.Port),
+		otelx.WithCollectorEnable(config.Config.OTELCollector.Enable),
+	)
+	defer cleanup()
+
+	logx.Debug = config.Config.Server.Debug
+	logger, _ := logx.GetZapLogger(ctx)
 	defer func() {
 		// can't handle the error due to https://github.com/uber-go/zap/issues/880
 		_ = logger.Sync()
 	}()
 
-	// verbosity 3 will avoid [transport] from emitting
-	grpczap.ReplaceGrpcLoggerV2WithVerbosity(logger, 3)
-
-	db := database.GetSharedConnection()
-	defer database.Close(db)
-
-	var temporalClientOptions client.Options
-	var err error
-	if config.Config.Temporal.Ca != "" && config.Config.Temporal.Cert != "" && config.Config.Temporal.Key != "" {
-		if temporalClientOptions, err = temporal.GetTLSClientOption(
-			config.Config.Temporal.HostPort,
-			config.Config.Temporal.Namespace,
-			zapadapter.NewZapAdapter(logger),
-			config.Config.Temporal.Ca,
-			config.Config.Temporal.Cert,
-			config.Config.Temporal.Key,
-			config.Config.Temporal.ServerName,
-			true,
-		); err != nil {
-			logger.Fatal(fmt.Sprintf("Unable to get Temporal client options: %s", err))
-		}
+	// Set gRPC logging based on debug mode
+	if config.Config.Server.Debug {
+		grpczap.ReplaceGrpcLoggerV2WithVerbosity(logger, 0) // All logs
 	} else {
-		if temporalClientOptions, err = temporal.GetClientOption(
-			config.Config.Temporal.HostPort,
-			config.Config.Temporal.Namespace,
-			zapadapter.NewZapAdapter(logger)); err != nil {
-			logger.Fatal(fmt.Sprintf("Unable to get Temporal client options: %s", err))
-		}
+		grpczap.ReplaceGrpcLoggerV2WithVerbosity(logger, 3) // verbosity 3 will avoid [transport] from emitting
 	}
 
-	temporalClient, err := client.Dial(temporalClientOptions)
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Unable to create client: %s", err))
-	}
-	defer temporalClient.Close()
-
-	// Shared options for the logger, with a custom gRPC code to log level function.
-	opts := []grpczap.Option{
-		grpczap.WithDecider(func(fullMethodName string, err error) bool {
-			// will not log gRPC calls if it was a call to liveness or readiness and no error was raised
-			if err == nil {
-				if match, _ := regexp.MatchString("vdp.pipeline.v1beta.PipelinePublicService/.*ness$", fullMethodName); match {
-					return false
-				}
-				// stop logging successful private function calls
-				if match, _ := regexp.MatchString("vdp.pipeline.v1beta.PipelinePrivateService/.*Admin$", fullMethodName); match {
-					return false
-				}
-			}
-			// by default everything will be logged
-			return true
+	// Get gRPC server options and credentials
+	grpcServerOpts, err := servergrpcx.NewServerOptionsAndCreds(
+		servergrpcx.WithServiceName(serviceName),
+		servergrpcx.WithServiceVersion(serviceVersion),
+		servergrpcx.WithServiceConfig(clientx.HTTPSConfig{
+			Cert: config.Config.Server.HTTPS.Cert,
+			Key:  config.Config.Server.HTTPS.Key,
 		}),
-	}
-
-	grpcServerOpts := []grpc.ServerOption{
-		grpc.StreamInterceptor(grpcmiddleware.ChainStreamServer(
-			middleware.StreamAppendMetadataInterceptor,
-			grpczap.StreamServerInterceptor(logger, opts...),
-			grpcrecovery.StreamServerInterceptor(middleware.RecoveryInterceptorOpt()),
-		)),
-		grpc.UnaryInterceptor(grpcmiddleware.ChainUnaryServer(
-			middleware.UnaryAppendMetadataInterceptor,
-			grpczap.UnaryServerInterceptor(logger, opts...),
-			grpcrecovery.UnaryServerInterceptor(middleware.RecoveryInterceptorOpt()),
-		)),
-	}
-
-	redisClient := redis.NewClient(&config.Config.Cache.Redis.RedisOptions)
-	defer redisClient.Close()
-
-	fgaClient, fgaClientConn := acl.InitOpenFGAClient(ctx, config.Config.OpenFGA.Host, config.Config.OpenFGA.Port)
-	if fgaClientConn != nil {
-		defer fgaClientConn.Close()
-	}
-	var fgaReplicaClient openfga.OpenFGAServiceClient
-	var fgaReplicaClientConn *grpc.ClientConn
-	if config.Config.OpenFGA.Replica.Host != "" {
-
-		fgaReplicaClient, fgaReplicaClientConn = acl.InitOpenFGAClient(ctx, config.Config.OpenFGA.Replica.Host, config.Config.OpenFGA.Replica.Port)
-		if fgaReplicaClientConn != nil {
-			defer fgaReplicaClientConn.Close()
-		}
-	}
-
-	aclClient := acl.NewACLClient(fgaClient, fgaReplicaClient, redisClient)
-
-	// Create tls based credential.
-	var creds credentials.TransportCredentials
-	var tlsConfig *tls.Config
-	if config.Config.Server.HTTPS.Cert != "" && config.Config.Server.HTTPS.Key != "" {
-		tlsConfig = &tls.Config{
-			ClientAuth: tls.RequireAndVerifyClientCert,
-			MinVersion: tls.VersionTLS12,
-		}
-		creds, err = credentials.NewServerTLSFromFile(config.Config.Server.HTTPS.Cert, config.Config.Server.HTTPS.Key)
-		if err != nil {
-			logger.Fatal(fmt.Sprintf("failed to create credentials: %v", err))
-		}
-		grpcServerOpts = append(grpcServerOpts, grpc.Creds(creds))
-	}
-
-	grpcServerOpts = append(grpcServerOpts, grpc.MaxRecvMsgSize(constant.MaxPayloadSize))
-	grpcServerOpts = append(grpcServerOpts, grpc.MaxSendMsgSize(constant.MaxPayloadSize))
-
-	pipelinePublicServiceClient, pipelinePublicServiceClientConn := InitPipelinePublicServiceClient(ctx)
-	if pipelinePublicServiceClientConn != nil {
-		defer pipelinePublicServiceClientConn.Close()
-	}
-	mgmtPrivateServiceClient, mgmtPrivateServiceClientConn := external.InitMgmtPrivateServiceClient(ctx)
-	if mgmtPrivateServiceClientConn != nil {
-		defer mgmtPrivateServiceClientConn.Close()
-	}
-
-	repo := repository.NewRepository(db, redisClient)
-	ms := memory.NewMemoryStore()
-
-	// Initialize Minio client
-	minioClient, err := miniox.NewMinioClientAndInitBucket(ctx, &config.Config.Minio, logger, service.MetadataExpiryRules...)
-	if err != nil {
-		logger.Fatal("failed to create minio client", zap.Error(err))
-	}
-	workerUID, _ := uuid.NewV4()
-	compStore := componentstore.Init(logger, config.Config.Component.Secrets, nil)
-
-	service := service.NewService(
-		repo,
-		redisClient,
-		temporalClient,
-		&aclClient,
-		service.NewConverter(mgmtPrivateServiceClient, redisClient, &aclClient, repo, config.Config.Server.InstillCoreHost),
-		mgmtPrivateServiceClient,
-		minioClient,
-		compStore,
-		ms,
-		workerUID, nil,
+		servergrpcx.WithSetOTELServerHandler(config.Config.OTELCollector.Enable),
 	)
+	if err != nil {
+		logger.Fatal("failed to create gRPC server options and credentials", zap.Error(err))
+	}
 
 	privateGrpcS := grpc.NewServer(grpcServerOpts...)
 	reflection.Register(privateGrpcS)
@@ -277,21 +117,60 @@ func main() {
 	publicGrpcS := grpc.NewServer(grpcServerOpts...)
 	reflection.Register(publicGrpcS)
 
-	pb.RegisterPipelinePrivateServiceServer(
-		privateGrpcS,
-		handler.NewPrivateHandler(ctx, service),
+	// Initialize all clients
+	pipelinePublicServiceClient, mgmtPublicServiceClient, mgmtPrivateServiceClient,
+		artifactPublicServiceClient, artifactPrivateServiceClient, redisClient, db,
+		minIOClient, minIOFileGetter, aclClient, temporalClient, closeClients := newClients(ctx, logger)
+	defer closeClients()
+
+	// Keep NewArtifactBinaryFetcher as requested
+	binaryFetcher := external.NewArtifactBinaryFetcher(artifactPrivateServiceClient, minIOFileGetter)
+
+	compStore := componentstore.Init(componentstore.InitParams{
+		Logger:         logger,
+		Secrets:        config.Config.Component.Secrets,
+		BinaryFetcher:  binaryFetcher,
+		TemporalClient: temporalClient,
+	})
+
+	pubsub := pubsub.NewRedisPubSub(redisClient)
+	ms := memory.NewStore(pubsub, minIOClient.WithLogger(logger))
+
+	repo := repository.NewRepository(db, redisClient)
+	service := service.NewService(
+		repo,
+		redisClient,
+		temporalClient,
+		&aclClient,
+		service.NewConverter(service.ConverterConfig{
+			MgmtClient:      mgmtPrivateServiceClient,
+			RedisClient:     redisClient,
+			ACLClient:       &aclClient,
+			Repository:      repo,
+			InstillCoreHost: config.Config.Server.InstillCoreHost,
+			ComponentStore:  compStore,
+		}),
+		mgmtPublicServiceClient,
+		mgmtPrivateServiceClient,
+		minIOClient,
+		compStore,
+		ms,
+		service.NewRetentionHandler(),
+		binaryFetcher,
+		artifactPublicServiceClient,
+		artifactPrivateServiceClient,
 	)
 
-	ph := handler.NewPublicHandler(ctx, service)
-	pb.RegisterPipelinePublicServiceServer(
-		publicGrpcS,
-		ph,
-	)
+	privateHandler := handler.NewPrivateHandler(service)
+	pipelinepb.RegisterPipelinePrivateServiceServer(privateGrpcS, privateHandler)
+
+	publicHandler := handler.NewPublicHandler(service)
+	pipelinepb.RegisterPipelinePublicServiceServer(publicGrpcS, publicHandler)
 
 	privateServeMux := runtime.NewServeMux(
-		runtime.WithForwardResponseOption(middleware.HTTPResponseModifier),
-		runtime.WithErrorHandler(middleware.ErrorHandler),
-		runtime.WithIncomingHeaderMatcher(middleware.CustomMatcher),
+		runtime.WithForwardResponseOption(gatewayx.HTTPResponseModifier),
+		runtime.WithErrorHandler(gatewayx.ErrorHandler),
+		runtime.WithIncomingHeaderMatcher(gatewayx.CustomHeaderMatcher),
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
 			MarshalOptions: protojson.MarshalOptions{
 				EmitUnpopulated: true,
@@ -304,9 +183,9 @@ func main() {
 	)
 
 	publicServeMux := runtime.NewServeMux(
-		runtime.WithForwardResponseOption(middleware.HTTPResponseModifier),
-		runtime.WithErrorHandler(middleware.ErrorHandler),
-		runtime.WithIncomingHeaderMatcher(middleware.CustomMatcher),
+		runtime.WithForwardResponseOption(gatewayx.HTTPResponseModifier),
+		runtime.WithErrorHandler(gatewayx.ErrorHandler),
+		runtime.WithIncomingHeaderMatcher(gatewayx.CustomHeaderMatcher),
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
 			MarshalOptions: protojson.MarshalOptions{
 				EmitUnpopulated: true,
@@ -321,51 +200,68 @@ func main() {
 	// Start usage reporter
 	var usg usage.Usage
 	if config.Config.Server.Usage.Enabled {
-		usageServiceClient, usageServiceClientConn := external.InitUsageServiceClient(ctx)
-		if usageServiceClientConn != nil {
-			defer usageServiceClientConn.Close()
-			logger.Info("try to start usage reporter")
-			go func() {
-				for {
-					usg = usage.NewUsage(ctx, repo, mgmtPrivateServiceClient, redisClient, usageServiceClient)
-					if usg != nil {
-						usg.StartReporter(ctx)
-						logger.Info("usage reporter started")
-						break
-					}
-					logger.Warn("retry to start usage reporter after 5 minutes")
-					time.Sleep(5 * time.Minute)
-				}
-			}()
+		usageServiceClient, usageServiceClientClose, err := clientgrpcx.NewClient[usagepb.UsageServiceClient](
+			clientgrpcx.WithServiceConfig(clientx.ServiceConfig{
+				Host:       config.Config.Server.Usage.Host,
+				PublicPort: config.Config.Server.Usage.Port,
+			}),
+			clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+		)
+		if err != nil {
+			logger.Error("failed to create usage service client", zap.Error(err))
 		}
+		defer func() {
+			if err := usageServiceClientClose(); err != nil {
+				logger.Error("failed to close usage service client", zap.Error(err))
+			}
+		}()
+		logger.Info("try to start usage reporter")
+		go func() {
+			for {
+				usg = usage.NewUsage(ctx, repo, mgmtPrivateServiceClient, redisClient, usageServiceClient, serviceVersion)
+				if usg != nil {
+					usg.StartReporter(ctx)
+					logger.Info("usage reporter started")
+					break
+				}
+				logger.Warn("retry to start usage reporter after 5 minutes")
+				time.Sleep(5 * time.Minute)
+			}
+		}()
 	}
 
-	// Start gRPC server
-	var dialOpts []grpc.DialOption
-	if config.Config.Server.HTTPS.Cert != "" && config.Config.Server.HTTPS.Key != "" {
-		dialOpts = []grpc.DialOption{grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constant.MaxPayloadSize), grpc.MaxCallSendMsgSize(constant.MaxPayloadSize))}
-	} else {
-		dialOpts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constant.MaxPayloadSize), grpc.MaxCallSendMsgSize(constant.MaxPayloadSize))}
+	dialOpts, err := clientgrpcx.NewClientOptionsAndCreds(
+		clientgrpcx.WithServiceConfig(clientx.ServiceConfig{
+			HTTPS: clientx.HTTPSConfig{
+				Cert: config.Config.Server.HTTPS.Cert,
+				Key:  config.Config.Server.HTTPS.Key,
+			},
+		}),
+		clientgrpcx.WithSetOTELClientHandler(false),
+	)
+	if err != nil {
+		logger.Fatal("failed to create client options and credentials", zap.Error(err))
 	}
 
-	if err := pb.RegisterPipelinePrivateServiceHandlerFromEndpoint(ctx, privateServeMux, fmt.Sprintf(":%v", config.Config.Server.PrivatePort), dialOpts); err != nil {
+	if err := pipelinepb.RegisterPipelinePrivateServiceHandlerFromEndpoint(ctx, privateServeMux, fmt.Sprintf(":%v", config.Config.Server.PrivatePort), dialOpts); err != nil {
 		logger.Fatal(err.Error())
 	}
 
-	if err := pb.RegisterPipelinePublicServiceHandlerFromEndpoint(ctx, publicServeMux, fmt.Sprintf(":%v", config.Config.Server.PublicPort), dialOpts); err != nil {
+	if err := pipelinepb.RegisterPipelinePublicServiceHandlerFromEndpoint(ctx, publicServeMux, fmt.Sprintf(":%v", config.Config.Server.PublicPort), dialOpts); err != nil {
 		logger.Fatal(err.Error())
 	}
 
-	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/trigger", middleware.AppendCustomHeaderMiddleware(publicServeMux, pipelinePublicServiceClient, handler.HandleTrigger, ms)); err != nil {
+	streamingHandler := handler.NewStreamingHandler(publicServeMux, pipelinePublicServiceClient, pubsub)
+	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/trigger", streamingHandler.HandleTrigger); err != nil {
 		logger.Fatal(err.Error())
 	}
-	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/triggerAsync", middleware.AppendCustomHeaderMiddleware(publicServeMux, pipelinePublicServiceClient, handler.HandleTriggerAsync, ms)); err != nil {
+	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/triggerAsync", streamingHandler.HandleTriggerAsync); err != nil {
 		logger.Fatal(err.Error())
 	}
-	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/releases/{releaseID=*}/trigger", middleware.AppendCustomHeaderMiddleware(publicServeMux, pipelinePublicServiceClient, handler.HandleTriggerRelease, ms)); err != nil {
+	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/releases/{releaseID=*}/trigger", streamingHandler.HandleTriggerRelease); err != nil {
 		logger.Fatal(err.Error())
 	}
-	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/releases/{releaseID=*}/triggerAsync", middleware.AppendCustomHeaderMiddleware(publicServeMux, pipelinePublicServiceClient, handler.HandleTriggerAsyncRelease, ms)); err != nil {
+	if err := publicServeMux.HandlePath("POST", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/releases/{releaseID=*}/triggerAsync", streamingHandler.HandleTriggerAsyncRelease); err != nil {
 		logger.Fatal(err.Error())
 	}
 	if err := publicServeMux.HandlePath("GET", "/v1beta/*/{namespaceID=*}/pipelines/{pipelineID=*}/image", middleware.HandleProfileImage(service, repo)); err != nil {
@@ -375,14 +271,12 @@ func main() {
 	privateHTTPServer := &http.Server{
 		Addr:              fmt.Sprintf(":%v", config.Config.Server.PrivatePort),
 		Handler:           grpcHandlerFunc(privateGrpcS, privateServeMux),
-		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 10 * time.Millisecond,
 	}
 
 	publicHTTPServer := &http.Server{
 		Addr:              fmt.Sprintf(":%v", config.Config.Server.PublicPort),
 		Handler:           grpcHandlerFunc(publicGrpcS, publicServeMux),
-		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 10 * time.Millisecond,
 	}
 
@@ -413,83 +307,13 @@ func main() {
 		}()
 	}
 
-	span.End()
 	logger.Info("gRPC server is running.")
-
-	// for only local temporal cluster
-	if config.Config.Temporal.Ca == "" && config.Config.Temporal.Cert == "" && config.Config.Temporal.Key == "" {
-		initTemporalNamespace(ctx, temporalClient)
-	}
-
-	timeseries := repository.MustNewInfluxDB(ctx)
-	defer timeseries.Close()
-
-	cw := pipelineworker.NewWorker(
-		repo,
-		redisClient,
-		timeseries.WriteAPI(),
-		compStore,
-		minioClient,
-		ms,
-		workerUID,
-	)
-
-	w := worker.New(temporalClient, pipelineworker.TaskQueue, worker.Options{
-		WorkflowPanicPolicy:                    worker.BlockWorkflow,
-		WorkerStopTimeout:                      gracefulShutdownTimeout,
-		MaxConcurrentWorkflowTaskExecutionSize: 100,
-	})
-	lw := worker.New(temporalClient, workerUID.String(), worker.Options{
-		WorkflowPanicPolicy:                worker.BlockWorkflow,
-		WorkerStopTimeout:                  gracefulShutdownTimeout,
-		MaxConcurrentActivityExecutionSize: 100,
-	})
-	mw := worker.New(temporalClient, fmt.Sprintf("%s-minio", workerUID.String()), worker.Options{
-		WorkflowPanicPolicy:                worker.BlockWorkflow,
-		WorkerStopTimeout:                  gracefulShutdownTimeout,
-		MaxConcurrentActivityExecutionSize: 50,
-	})
-
-	w.RegisterWorkflow(cw.TriggerPipelineWorkflow)
-	w.RegisterWorkflow(cw.SchedulePipelineWorkflow)
-
-	lw.RegisterActivity(cw.ComponentActivity)
-	lw.RegisterActivity(cw.OutputActivity)
-	lw.RegisterActivity(cw.PreIteratorActivity)
-	lw.RegisterActivity(cw.PostIteratorActivity)
-	lw.RegisterActivity(cw.PreTriggerActivity)
-	lw.RegisterActivity(cw.LoadDAGDataActivity)
-	lw.RegisterActivity(cw.PostTriggerActivity)
-	lw.RegisterActivity(cw.ClosePipelineActivity)
-	lw.RegisterActivity(cw.IncreasePipelineTriggerCountActivity)
-	lw.RegisterActivity(cw.UpdatePipelineRunActivity)
-	lw.RegisterActivity(cw.UpsertComponentRunActivity)
-
-	mw.RegisterActivity(cw.UploadInputsToMinioActivity)
-	mw.RegisterActivity(cw.UploadOutputsToMinioActivity)
-	mw.RegisterActivity(cw.UploadRecipeToMinioActivity)
-	mw.RegisterActivity(cw.UploadComponentInputsActivity)
-	mw.RegisterActivity(cw.UploadComponentOutputsActivity)
-
-	err = w.Start()
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Unable to start worker: %s", err))
-	}
-	err = lw.Start()
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Unable to start local worker: %s", err))
-	}
-	err = mw.Start()
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Unable to start minio worker: %s", err))
-	}
-	logger.Info("worker is running.")
 
 	// kill (no param) default send syscall.SIGTERM
 	// kill -2 is syscall.SIGINT
 	// kill -9 is syscall.SIGKILL but can't be catch, so don't need add it
 	signal.Notify(quitSig, syscall.SIGINT, syscall.SIGTERM)
-	ph.(*handler.PublicHandler).SetReadiness(true)
+	publicHandler.SetReadiness(true)
 	select {
 	case err := <-errSig:
 		logger.Error(fmt.Sprintf("Fatal error: %v\n", err))
@@ -513,11 +337,6 @@ func main() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 		defer shutdownCancel()
 
-		logger.Info("Shutting down worker...")
-		w.Stop()
-		lw.Stop()
-		mw.Stop()
-
 		logger.Info("Shutting down HTTP server...")
 		_ = privateHTTPServer.Shutdown(shutdownCtx)
 		_ = publicHTTPServer.Shutdown(shutdownCtx)
@@ -528,44 +347,173 @@ func main() {
 	}
 }
 
-func initTemporalNamespace(ctx context.Context, client client.Client) {
-	logger, _ := logger.GetZapLogger(ctx)
+func grpcHandlerFunc(grpcServer *grpc.Server, gwHandler http.Handler) http.Handler {
+	return h2c.NewHandler(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
+				grpcServer.ServeHTTP(w, r)
+			} else {
+				gwHandler.ServeHTTP(w, r)
+			}
+		}),
+		&http2.Server{},
+	)
+}
 
-	resp, err := client.WorkflowService().ListNamespaces(ctx, &workflowservice.ListNamespacesRequest{})
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Unable to list namespaces: %s", err))
-	}
+func newClients(ctx context.Context, logger *zap.Logger) (
+	pipelinepb.PipelinePublicServiceClient,
+	mgmtpb.MgmtPublicServiceClient,
+	mgmtpb.MgmtPrivateServiceClient,
+	artifactpb.ArtifactPublicServiceClient,
+	artifactpb.ArtifactPrivateServiceClient,
+	*redis.Client,
+	*gorm.DB,
+	miniox.Client,
+	*miniox.FileGetter,
+	acl.ACLClient,
+	temporalclient.Client,
+	func(),
+) {
+	closeFuncs := map[string]func() error{}
 
-	found := false
-	for _, n := range resp.GetNamespaces() {
-		if n.NamespaceInfo.Name == config.Config.Temporal.Namespace {
-			found = true
-		}
-	}
-
-	if !found {
-		if _, err := client.WorkflowService().RegisterNamespace(ctx,
-			&workflowservice.RegisterNamespaceRequest{
-				Namespace: config.Config.Temporal.Namespace,
-				WorkflowExecutionRetentionPeriod: func() *time.Duration {
-					// Check if the string ends with "d" for day.
-					s := config.Config.Temporal.Retention
-					if strings.HasSuffix(s, "d") {
-						// Parse the number of days.
-						days, err := strconv.Atoi(s[:len(s)-1])
-						if err != nil {
-							logger.Fatal(fmt.Sprintf("Unable to parse retention period in day: %s", err))
-						}
-						// Convert days to hours and then to a duration.
-						t := time.Hour * 24 * time.Duration(days)
-						return &t
-					}
-					logger.Fatal(fmt.Sprintf("Unable to parse retention period in day: %s", err))
-					return nil
-				}(),
+	// Initialize external service clients
+	pipelinePublicServiceClient, pipelinePublicClose, err := clientgrpcx.NewClient[pipelinepb.PipelinePublicServiceClient](
+		clientgrpcx.WithServiceConfig(clientx.ServiceConfig{
+			Host:       config.Config.Server.InstanceID,
+			PublicPort: config.Config.Server.PublicPort,
+			HTTPS: clientx.HTTPSConfig{
+				Cert: config.Config.Server.HTTPS.Cert,
+				Key:  config.Config.Server.HTTPS.Key,
 			},
-		); err != nil {
-			logger.Fatal(fmt.Sprintf("Unable to register namespace: %s", err))
+		}),
+		clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+	)
+	if err != nil {
+		logger.Fatal("failed to create pipeline public service client", zap.Error(err))
+	}
+	closeFuncs["pipelinePublic"] = pipelinePublicClose
+
+	mgmtPublicServiceClient, mgmtPublicClose, err := clientgrpcx.NewClient[mgmtpb.MgmtPublicServiceClient](
+		clientgrpcx.WithServiceConfig(config.Config.MgmtBackend),
+		clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+	)
+	if err != nil {
+		logger.Fatal("failed to create mgmt public service client", zap.Error(err))
+	}
+	closeFuncs["mgmtPublic"] = mgmtPublicClose
+
+	mgmtPrivateServiceClient, mgmtPrivateClose, err := clientgrpcx.NewClient[mgmtpb.MgmtPrivateServiceClient](
+		clientgrpcx.WithServiceConfig(config.Config.MgmtBackend),
+		clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+	)
+	if err != nil {
+		logger.Fatal("failed to create mgmt private service client", zap.Error(err))
+	}
+	closeFuncs["mgmtPrivate"] = mgmtPrivateClose
+
+	artifactPublicServiceClient, artifactPublicClose, err := clientgrpcx.NewClient[artifactpb.ArtifactPublicServiceClient](
+		clientgrpcx.WithServiceConfig(config.Config.ArtifactBackend),
+		clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+	)
+	if err != nil {
+		logger.Fatal("failed to create artifact public service client", zap.Error(err))
+	}
+	closeFuncs["artifactPublic"] = artifactPublicClose
+
+	artifactPrivateServiceClient, artifactPrivateClose, err := clientgrpcx.NewClient[artifactpb.ArtifactPrivateServiceClient](
+		clientgrpcx.WithServiceConfig(config.Config.ArtifactBackend),
+		clientgrpcx.WithSetOTELClientHandler(config.Config.OTELCollector.Enable),
+	)
+	if err != nil {
+		logger.Fatal("failed to create artifact private service client", zap.Error(err))
+	}
+	closeFuncs["artifactPrivate"] = artifactPrivateClose
+
+	// Initialize database
+	db := database.GetSharedConnection()
+	closeFuncs["database"] = func() error {
+		database.Close(db)
+		return nil
+	}
+
+	// Initialize Temporal client
+	temporalClientOptions, err := temporal.ClientOptions(config.Config.Temporal, logger)
+	if err != nil {
+		logger.Fatal("Unable to build Temporal client options", zap.Error(err))
+	}
+
+	// Only add interceptor if tracing is enabled
+	if config.Config.OTELCollector.Enable {
+		temporalTracingInterceptor, err := opentelemetry.NewTracingInterceptor(opentelemetry.TracerOptions{
+			Tracer:            otel.Tracer(serviceName),
+			TextMapPropagator: otel.GetTextMapPropagator(),
+		})
+		if err != nil {
+			logger.Fatal("Unable to create temporal tracing interceptor", zap.Error(err))
+		}
+		temporalClientOptions.Interceptors = []interceptor.ClientInterceptor{temporalTracingInterceptor}
+	}
+
+	temporalClient, err := temporalclient.Dial(temporalClientOptions)
+	if err != nil {
+		logger.Fatal("Unable to create Temporal client", zap.Error(err))
+	}
+	closeFuncs["temporal"] = func() error {
+		temporalClient.Close()
+		return nil
+	}
+
+	// Initialize redis client
+	redisClient := redis.NewClient(&config.Config.Cache.Redis.RedisOptions)
+	closeFuncs["redis"] = redisClient.Close
+
+	// Initialize ACL client
+	fgaClient, fgaClientConn := acl.InitOpenFGAClient(ctx, config.Config.OpenFGA.Host, config.Config.OpenFGA.Port)
+	if fgaClientConn != nil {
+		closeFuncs["fga"] = fgaClientConn.Close
+	}
+
+	var fgaReplicaClient openfga.OpenFGAServiceClient
+	if config.Config.OpenFGA.Replica.Host != "" {
+		var fgaReplicaClientConn *grpc.ClientConn
+		fgaReplicaClient, fgaReplicaClientConn = acl.InitOpenFGAClient(ctx, config.Config.OpenFGA.Replica.Host, config.Config.OpenFGA.Replica.Port)
+		if fgaReplicaClientConn != nil {
+			closeFuncs["fgaReplica"] = fgaReplicaClientConn.Close
 		}
 	}
+
+	aclClient := acl.NewACLClient(fgaClient, fgaReplicaClient, redisClient)
+
+	// Initialize MinIO client
+	minIOParams := miniox.ClientParams{
+		Config: config.Config.Minio,
+		Logger: logger,
+		AppInfo: miniox.AppInfo{
+			Name:    serviceName,
+			Version: serviceVersion,
+		},
+	}
+	minIOFileGetter, err := miniox.NewFileGetter(minIOParams)
+	if err != nil {
+		logger.Fatal("Failed to create MinIO file getter", zap.Error(err))
+	}
+
+	retentionHandler := service.NewRetentionHandler()
+	minIOParams.ExpiryRules = retentionHandler.ListExpiryRules()
+	minIOClient, err := miniox.NewMinIOClientAndInitBucket(ctx, minIOParams)
+	if err != nil {
+		logger.Fatal("failed to create MinIO client", zap.Error(err))
+	}
+
+	closer := func() {
+		for conn, fn := range closeFuncs {
+			if err := fn(); err != nil {
+				logger.Error("Failed to close conn", zap.Error(err), zap.String("conn", conn))
+			}
+		}
+	}
+
+	return pipelinePublicServiceClient, mgmtPublicServiceClient, mgmtPrivateServiceClient,
+		artifactPublicServiceClient, artifactPrivateServiceClient, redisClient, db,
+		minIOClient, minIOFileGetter, aclClient, temporalClient, closer
 }

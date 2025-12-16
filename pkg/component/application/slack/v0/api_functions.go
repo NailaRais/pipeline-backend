@@ -5,13 +5,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/instill-ai/x/errmsg"
 	"github.com/slack-go/slack"
+
+	errorsx "github.com/instill-ai/x/errors"
 )
 
 var types = []string{"private_channel", "public_channel"}
 
-func loopChannelListAPI(client SlackClient, channelName string) (string, error) {
+func loopChannelListAPI(client slackClient, channelName string) (string, error) {
 	var apiParams slack.GetConversationsParameters
 	apiParams.Types = types
 
@@ -30,7 +31,7 @@ func loopChannelListAPI(client SlackClient, channelName string) (string, error) 
 		}
 
 		if targetChannelID == "" && nextCur == "" {
-			return "", errmsg.AddMessage(
+			return "", errorsx.AddMessage(
 				fmt.Errorf("couldn't find channel by name"),
 				fmt.Sprintf("Couldn't find channel [%s].", channelName),
 			)
@@ -50,7 +51,7 @@ func getChannelID(channelName string, channels []slack.Channel) (channelID strin
 	return ""
 }
 
-func getConversationHistory(client SlackClient, channelID string, nextCur string) (*slack.GetConversationHistoryResponse, error) {
+func getConversationHistory(client slackClient, channelID string, nextCur string) (*slack.GetConversationHistoryResponse, error) {
 	apiHistoryParams := slack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Cursor:    nextCur,
@@ -68,7 +69,7 @@ func getConversationHistory(client SlackClient, channelID string, nextCur string
 	return historiesResp, nil
 }
 
-func getConversationReply(client SlackClient, channelID string, ts string) ([]slack.Message, error) {
+func getConversationReply(client slackClient, channelID string, ts string) ([]slack.Message, error) {
 	apiParams := slack.GetConversationRepliesParameters{
 		ChannelID: channelID,
 		Timestamp: ts,

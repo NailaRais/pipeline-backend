@@ -28,14 +28,14 @@ const urlUserMe = "https://api.numbersprotocol.io/api/v3/auth/users/me"
 var once sync.Once
 var comp *component
 
-//go:embed config/definition.json
-var definitionJSON []byte
+//go:embed config/definition.yaml
+var definitionYAML []byte
 
-//go:embed config/setup.json
-var setupJSON []byte
+//go:embed config/setup.yaml
+var setupYAML []byte
 
-//go:embed config/tasks.json
-var tasksJSON []byte
+//go:embed config/tasks.yaml
+var tasksYAML []byte
 
 type component struct {
 	base.Component
@@ -107,7 +107,7 @@ type Output struct {
 func Init(bc base.Component) *component {
 	once.Do(func() {
 		comp = &component{Component: bc}
-		err := comp.LoadDefinition(definitionJSON, setupJSON, tasksJSON, nil)
+		err := comp.LoadDefinition(definitionYAML, setupYAML, tasksYAML, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -252,7 +252,7 @@ func (e *execution) Execute(ctx context.Context, jobs []*base.Job) error {
 				AssetCreator:      inputStruct.AssetCreator,
 				DigitalSourceType: inputStruct.DigitalSourceType,
 				MiningPreference:  inputStruct.MiningPreference,
-				GeneratedThrough:  "https://instill.tech", //TODO: support Core Host
+				GeneratedThrough:  "https://instill-ai.com", //TODO: support Core Host
 				GeneratedBy:       inputStruct.GeneratedBy,
 				License:           commitLicense,
 				Metadata:          &meta,

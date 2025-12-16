@@ -1,0 +1,102 @@
+$defs:
+  segment:
+    properties:
+      start-time:
+        title: Start Time
+        description: The number of seconds from the beginning of the audio file to the start of this segment.
+        uiOrder: 0
+        type: number
+      end-time:
+        title: End Time
+        description: The number of seconds from the beginning of the audio file to the end of this segment.
+        uiOrder: 1
+        type: number
+    required:
+      - start-time
+      - end-time
+    title: Segment
+    description: A time segment of audio data, defined by its start and end times in seconds.
+    type: object
+TASK_DETECT_ACTIVITY:
+  shortDescription: Detect speech segments in audio data using Voice Activity Detection (VAD). This task processes the input audio to 16kHz mono format,
+    identifies periods of human speech, and outputs time segments for each detected speech activity.
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      audio:
+        description: Audio file to analyze for speech activity.
+        type: string
+        uiOrder: 0
+        title: Audio
+      min-silence-duration:
+        description: Minimum duration of silence (in milliseconds) required to split speech segments. Longer values result in fewer, longer segments.
+        type: integer
+        uiOrder: 1
+        minimum: 0
+        title: Minimum Silence Duration
+        default: 100
+      speech-pad:
+        description: Additional padding (in milliseconds) added to the start and end of each detected speech segment to prevent cutting off speech.
+        type: integer
+        uiOrder: 2
+        minimum: 0
+        title: Speech Pad
+        default: 30
+    required:
+      - audio
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      segments:
+        description: Array of time segments representing detected speech activity. Each segment contains start and end times in seconds.
+        uiOrder: 0
+        items:
+          $ref: '#/$defs/segment'
+        title: Segments
+        type: array
+    required:
+      - segments
+    title: Output
+    type: object
+TASK_SEGMENT:
+  shortDescription: Segment audio data into pieces based on the provided time segments.
+  input:
+    description: Input.
+    uiOrder: 0
+    properties:
+      audio:
+        description: Audio data to segment.
+        type: string
+        uiOrder: 0
+        title: Audio
+      segments:
+        description: A list of time segments of audio data.
+        uiOrder: 1
+        items:
+          $ref: '#/$defs/segment'
+        title: Segments
+        type: array
+    required:
+      - audio
+      - segments
+    title: Input
+    type: object
+  output:
+    description: Output.
+    uiOrder: 0
+    properties:
+      audio-segments:
+        description: A list of segmented audio data.
+        uiOrder: 0
+        items:
+          type: audio
+        title: Audios
+        type: array
+    required:
+      - audio-segments
+    title: Output
+    type: object
